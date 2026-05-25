@@ -25,7 +25,6 @@ import numpy as np
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 
-
 # ─── MODELO ───────────────────────────────────────────────────
 MODEL_URL = (
     "https://storage.googleapis.com/mediapipe-models/hand_landmarker/"

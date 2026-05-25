@@ -1,19 +1,32 @@
-import argparse
+﻿"""
+SPECTRA - Sistema de Pintura e Educacao Com Tecnologia de Reconhecimento de maos
+Totalmente controlado por gestos com a camera. Sem teclado, sem mouse.
+
+Modos:
+  Menu Principal    - navegacao por hover do indicador
+  Pintura Livre     - combinacoes de dedos formam cores; desfazer, salvar
+  Educacao: Cores   - quiz: gesticule a cor exibida
+  Educacao: Contagem- levante exatamente N dedos
+  Fisioterapia      - exercicios guiados de reabilitacao
+"""
+
 import os
 import time
 import urllib.request
-from pathlib import Path
+import random
+import math
+import collections
 from enum import Enum
 
 import cv2
 import mediapipe as mp
 import numpy as np
 
-# MediaPipe Tasks API (versão 0.10.35+)
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 
 
+# ─── MODELO ───────────────────────────────────────────────────
 MODEL_URL = (
     "https://storage.googleapis.com/mediapipe-models/hand_landmarker/"
     "hand_landmarker/float16/1/hand_landmarker.task"
@@ -21,647 +34,1046 @@ MODEL_URL = (
 MODEL_PATH = "hand_landmarker.task"
 
 
-class DrawMode(Enum):
-    """Modos de desenho."""
-    ERASER = "Borracha"
-    COLOR1 = "Vermelho"
-    COLOR2 = "Verde"
-    COLOR3 = "Azul"
-    COLOR4 = "Amarelo"
-
-
-# Cores em BGR (OpenCV)
-COLORS = {
-    DrawMode.COLOR1: (0, 0, 255),      # Vermelho
-    DrawMode.COLOR2: (0, 255, 0),      # Verde
-    DrawMode.COLOR3: (255, 0, 0),      # Azul
-    DrawMode.COLOR4: (0, 255, 255),    # Amarelo
-}
-
-# Mapeamento: dedo estendido -> modo/cor
-FINGER_TO_MODE = {
-    "index": DrawMode.COLOR1,
-    "middle": DrawMode.COLOR2,
-    "ring": DrawMode.COLOR3,
-    "pinky": DrawMode.COLOR4,
-    "thumb": DrawMode.ERASER,
-}
-
-UI_BAR_HEIGHT = 110
-HOVER_SELECT_SECONDS = 0.8
-
-GESTURE_HOLD_SECONDS = 1.2
-SMOOTH_ALPHA = 0.35
-
-
 def ensure_model(model_path: str) -> None:
-    """Baixa o modelo se não existir."""
     if os.path.exists(model_path):
-        print(f"✓ Modelo encontrado: {model_path}")
         return
-    
-    print(f"📥 Baixando modelo ({MODEL_URL})...")
-    try:
-        urllib.request.urlretrieve(MODEL_URL, model_path)
-        print(f"✓ Modelo baixado com sucesso")
-    except Exception as e:
-        raise RuntimeError(f"Falha ao baixar modelo: {e}")
+    print("Baixando modelo de landmarks...")
+    urllib.request.urlretrieve(MODEL_URL, model_path)
+    print("Modelo baixado com sucesso.")
 
 
-def get_finger_position(hand_landmarks, landmark_index: int, frame_shape):
-    """Obtém posição normalizada de um landmark."""
-    landmark = hand_landmarks[landmark_index]
-    h, w = frame_shape[:2]
-    x = int(landmark.x * w)
-    y = int(landmark.y * h)
-    return (x, y)
+# ─── CONFIGURACOES GERAIS ──────────────────────────────────────
+SMOOTH_ALPHA      = 0.35
+HOVER_SELECT_SECS = 1.2
+GESTURE_HOLD_SECS = 1.5
+TRAIL_LENGTH      = 18
+UNDO_HISTORY      = 15
 
 
-def is_finger_extended(hand_landmarks, finger_tip: int, finger_pip: int) -> bool:
-    """Verifica se um dedo está estendido."""
-    return hand_landmarks[finger_tip].y < hand_landmarks[finger_pip].y
+# ─── MODOS DA APP ─────────────────────────────────────────────
+class AppMode(Enum):
+    MENU        = "Menu Principal"
+    PAINT       = "Pintura Livre"
+    EDU_COLORS  = "Educacao: Cores"
+    EDU_COUNT   = "Educacao: Contagem"
+    PHYSIO      = "Fisioterapia"
 
 
-def count_fingers(hand_landmarks) -> int:
-    """Conta quantos dedos estão estendidos."""
-    # Landmarks: 0=pulso, 4=polegar, 8=indicador, 12=médio, 16=anelar, 20=mindinho
-    fingers = [
-        is_finger_extended(hand_landmarks, 4, 3),   # Polegar
-        is_finger_extended(hand_landmarks, 8, 6),   # Indicador
-        is_finger_extended(hand_landmarks, 12, 10), # Médio
-        is_finger_extended(hand_landmarks, 16, 14), # Anelar
-        is_finger_extended(hand_landmarks, 20, 18), # Mindinho
-    ]
-    return sum(fingers)
+# ─── COMBINACOES DE DEDOS → COR ───────────────────────────────
+# (polegar, indicador, medio, anelar, mindinho) True=levantado
+COMBO_COLORS = [
+    ((False, True,  False, False, False), "Vermelho",     (0,   0,   255)),
+    ((False, False, True,  False, False), "Verde",        (0,   255, 0  )),
+    ((False, False, False, True,  False), "Azul",         (255, 0,   0  )),
+    ((False, False, False, False, True ), "Amarelo",      (0,   255, 255)),
+    ((False, True,  True,  False, False), "Laranja",      (0,   165, 255)),
+    ((False, True,  False, True,  False), "Roxo",         (128, 0,   128)),
+    ((False, True,  False, False, True ), "Rosa",         (147, 20,  255)),
+    ((False, False, True,  True,  False), "Ciano",        (255, 255, 0  )),
+    ((False, False, True,  False, True ), "Marrom",       (42,  42,  165)),
+    ((False, True,  True,  True,  False), "Branco/Apaga", (255, 255, 255)),
+    ((False, False, False, True,  True ), "DESFAZER",     None           ),  # anelar+mindinho
+    ((True,  False, False, False, False), "Borracha",     None           ),  # polegar
+    ((True,  True,  True,  True,  True ), "LIMPAR",       None           ),  # mao aberta
+]
+
+ERASER_COLOR_BGR = (255, 255, 255)
+ERASER_SIZE      = 50
+DEFAULT_BRUSH    = 10
 
 
+# ─── BOTAO UI ─────────────────────────────────────────────────
+class Button:
+    def __init__(self, x, y, w, h, label,
+                 color_bg=(50, 50, 50), color_text=(255, 255, 255), value=None):
+        self.rect = (x, y, w, h)
+        self.label = label
+        self.color_bg = color_bg
+        self.color_text = color_text
+        self.value = value
+        self.hover_start = None
+        self.progress = 0.0
+
+    def contains(self, pt):
+        x, y, w, h = self.rect
+        return x <= pt[0] <= x + w and y <= pt[1] <= y + h
+
+    def update_hover(self, pointing):
+        if not pointing:
+            self.hover_start = None
+            self.progress = 0.0
+            return False
+        if self.hover_start is None:
+            self.hover_start = time.time()
+        elapsed = time.time() - self.hover_start
+        self.progress = min(1.0, elapsed / HOVER_SELECT_SECS)
+        if elapsed >= HOVER_SELECT_SECS:
+            self.hover_start = None
+            self.progress = 0.0
+            return True
+        return False
+
+    def draw(self, frame):
+        x, y, w, h = self.rect
+        cv2.rectangle(frame, (x, y), (x + w, y + h), self.color_bg, -1)
+        cv2.rectangle(frame, (x, y), (x + w, y + h), (180, 180, 180), 2)
+        if self.progress > 0:
+            cv2.rectangle(frame, (x, y + h - 5),
+                          (x + int(w * self.progress), y + h), (0, 220, 255), -1)
+        fs = 0.52
+        (tw, th), _ = cv2.getTextSize(self.label, cv2.FONT_HERSHEY_SIMPLEX, fs, 1)
+        cv2.putText(frame, self.label,
+                    (x + (w - tw) // 2, y + (h + th) // 2 - 3),
+                    cv2.FONT_HERSHEY_SIMPLEX, fs, self.color_text, 1, cv2.LINE_AA)
+
+
+# ─── CANVAS COM UNDO ──────────────────────────────────────────
 class DrawingCanvas:
-    """Canvas para desenho."""
-
-    def __init__(self, width: int, height: int):
+    def __init__(self, width, height):
         self.width = width
         self.height = height
         self.canvas = np.ones((height, width, 3), dtype=np.uint8) * 255
-        self.mode = DrawMode.COLOR1
-        self.brush_size = 8
-        self.eraser_size = 40
+        self._history = collections.deque(maxlen=UNDO_HISTORY)
 
-    def draw_point(self, pt: tuple, size: int, color: tuple):
-        """Desenha um ponto no canvas."""
-        if self.mode == DrawMode.ERASER:
-            cv2.circle(self.canvas, pt, self.eraser_size, (255, 255, 255), -1)
-        else:
-            cv2.circle(self.canvas, pt, size, color, -1)
+    def begin_stroke(self):
+        """Salva estado antes de iniciar novo traco (para undo)."""
+        self._history.append(self.canvas.copy())
 
-    def draw_line(self, pt1: tuple, pt2: tuple, size: int, color: tuple):
-        """Desenha uma linha no canvas."""
-        if self.mode == DrawMode.ERASER:
-            cv2.line(self.canvas, pt1, pt2, (255, 255, 255), self.eraser_size)
+    def undo(self):
+        """Restaura estado anterior. Retorna True se havia historico."""
+        if self._history:
+            self.canvas = self._history.pop()
+            return True
+        return False
+
+    def draw(self, pt1, pt2, color_bgr, size):
+        if color_bgr is None:
+            cv2.line(self.canvas, pt1, pt2, ERASER_COLOR_BGR, ERASER_SIZE)
+            cv2.circle(self.canvas, pt2, ERASER_SIZE // 2, ERASER_COLOR_BGR, -1)
         else:
-            cv2.line(self.canvas, pt1, pt2, color, size)
+            cv2.line(self.canvas, pt1, pt2, color_bgr, size)
+            cv2.circle(self.canvas, pt2, size // 2, color_bgr, -1)
 
     def clear(self):
-        """Limpa o canvas."""
-        self.canvas = np.ones((self.height, self.width, 3), dtype=np.uint8) * 255
+        self._history.append(self.canvas.copy())
+        self.canvas[:] = 255
 
-    def set_mode(self, mode: DrawMode):
-        """Muda o modo de desenho."""
-        self.mode = mode
 
-    def get_mode_display(self) -> str:
-        """Retorna texto para exibir modo atual."""
-        return f"Modo atual: {self.mode.value}"
+# ─── RASTRO VISUAL (TRAIL) ────────────────────────────────────
+class Trail:
+    """Pontos com fade-out temporal para rastro do dedo."""
+    def __init__(self, maxlen=TRAIL_LENGTH):
+        self._pts = collections.deque(maxlen=maxlen)
+
+    def add(self, pt, color):
+        self._pts.append((pt, color, time.time()))
+
+    def clear(self):
+        self._pts.clear()
+
+    def draw(self, frame):
+        now = time.time()
+        for pt, color, t in list(self._pts):
+            age = now - t
+            if age > 0.45:
+                continue
+            alpha = 1.0 - age / 0.45
+            r = max(2, int(7 * alpha))
+            c = tuple(int(ch * alpha) for ch in (color if color else (180, 180, 180)))
+            overlay = frame.copy()
+            cv2.circle(overlay, pt, r, c, -1)
+            cv2.addWeighted(overlay, alpha * 0.65, frame, 1 - alpha * 0.65, 0, frame)
+
+
+# ─── UTILITARIOS DE MAO ───────────────────────────────────────
+def get_finger_states(lm, hand_label="Right"):
+    """
+    Retorna (polegar, indicador, medio, anelar, mindinho) True=levantado.
+    Usa eixo-X para o polegar (mais confiavel que eixo-Y).
+    """
+    if hand_label == "Right":
+        thumb = lm[4].x < lm[3].x   # polegar vai para esquerda (mao direita espelhada)
+    else:
+        thumb = lm[4].x > lm[3].x
+    index  = lm[8].y  < lm[6].y
+    middle = lm[12].y < lm[10].y
+    ring   = lm[16].y < lm[14].y
+    pinky  = lm[20].y < lm[18].y
+    return (thumb, index, middle, ring, pinky)
+
+
+def get_index_tip(lm, frame_shape):
+    """Posicao da ponta do indicador em pixels, ou None."""
+    h, w = frame_shape[:2]
+    if lm[8].y < lm[6].y:
+        return (int(lm[8].x * w), int(lm[8].y * h))
+    return None
+
+
+def resolve_color(states):
+    for combo, name, bgr in COMBO_COLORS:
+        if states == combo:
+            return (name, bgr)
+    return None
+
+
+def count_extended(states):
+    return sum(states)
+
+
+def smooth_pt(prev, pt, alpha=SMOOTH_ALPHA):
+    if prev is None:
+        return pt
+    return (int((1 - alpha) * prev[0] + alpha * pt[0]),
+            int((1 - alpha) * prev[1] + alpha * pt[1]))
+
+
+def draw_finger_hud(frame, states, x0, y0):
+    """Mini-HUD com indicadores dos 5 dedos (P I M A Mi)."""
+    labels = ["P", "I", "M", "A", "Mi"]
+    for i, (label, up) in enumerate(zip(labels, states)):
+        cx = x0 + i * 28
+        fill = (0, 200, 80) if up else (55, 55, 55)
+        cv2.circle(frame, (cx, y0), 11, fill, -1)
+        cv2.circle(frame, (cx, y0), 11, (180, 180, 180), 1)
+        cv2.putText(frame, label, (cx - 6, y0 + 4),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.33, (255, 255, 255), 1, cv2.LINE_AA)
+
+
+# ─── MENU ─────────────────────────────────────────────────────
+class MenuMode:
+    def __init__(self, W, H):
+        self.W = W
+        self.H = H
+        bw, bh, gap = 320, 72, 22
+        cx = (W - bw) // 2
+        sy = (H - (5 * bh + 4 * gap)) // 2
+        self.buttons = [
+            Button(cx, sy + 0*(bh+gap), bw, bh, "Pintura Livre",       (20, 90, 20),  value=AppMode.PAINT),
+            Button(cx, sy + 1*(bh+gap), bw, bh, "Educacao: Cores",     (20, 20, 120), value=AppMode.EDU_COLORS),
+            Button(cx, sy + 2*(bh+gap), bw, bh, "Educacao: Contagem",  (80, 20, 120), value=AppMode.EDU_COUNT),
+            Button(cx, sy + 3*(bh+gap), bw, bh, "Fisioterapia",        (120, 55, 15), value=AppMode.PHYSIO),
+            Button(cx, sy + 4*(bh+gap), bw, bh, "Sair",                (120, 15, 15), value="quit"),
+        ]
+        self.smooth_tip = None
+
+    def process(self, frame, lm_list, hd_list):
+        ov = frame.copy()
+        cv2.rectangle(ov, (0, 0), (self.W, self.H), (12, 12, 12), -1)
+        cv2.addWeighted(ov, 0.55, frame, 0.45, 0, frame)
+
+        cv2.putText(frame, "SPECTRA", (self.W//2 - 95, 58),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.7, (0, 220, 255), 3, cv2.LINE_AA)
+        cv2.putText(frame, "Aponte o indicador e segure sobre o botao (1.2s)",
+                    (self.W//2 - 285, 92),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (170, 170, 170), 1, cv2.LINE_AA)
+
+        tip = None
+        states = None
+        if lm_list:
+            lm = lm_list[0]
+            label = hd_list[0][0].category_name if hd_list else "Right"
+            states = get_finger_states(lm, label)
+            raw = get_index_tip(lm, frame.shape)
+            if raw:
+                self.smooth_tip = smooth_pt(self.smooth_tip, raw)
+                tip = self.smooth_tip
+                cv2.circle(frame, tip, 14, (0, 220, 255), -1)
+                cv2.circle(frame, tip, 14, (255, 255, 255), 2)
+        else:
+            self.smooth_tip = None
+
+        selected = None
+        for btn in self.buttons:
+            if btn.update_hover(tip is not None and btn.contains(tip)):
+                selected = btn.value
+            btn.draw(frame)
+
+        if states is not None:
+            draw_finger_hud(frame, states, self.W - 155, self.H - 22)
+
+        return frame, selected
+
+
+# ─── PINTURA LIVRE ────────────────────────────────────────────
+class PaintMode:
+    def __init__(self, W, H):
+        self.W = W
+        self.H = H
+        self.canvas = DrawingCanvas(W, H)
+        self.smooth_tip = None
+        self.prev_tip = None
+        self.current_name = "Nenhum"
+        self.current_bgr = None
+        self.brush = DEFAULT_BRUSH
+        self.trail = Trail()
+        self.drawing = False
+        self.feedback_msg = ""
+        self.feedback_time = 0.0
+        self.cmd_name = None
+        self.cmd_start = None
+        self.cmd_progress = 0.0
+        bw, bh = 112, 42
+        y = H - bh - 10
+        self.buttons = [
+            Button(10,       y, bw, bh, "Limpar",   (80, 20, 20),  value="clear"),
+            Button(130,      y, bw, bh, "Salvar",   (20, 70, 20),  value="save"),
+            Button(250,      y, bw, bh, "Desfazer", (80, 60, 10),  value="undo"),
+            Button(370,      y, bw, bh, "Menu",     (20, 20, 80),  value="menu"),
+        ]
+
+    def _feedback(self, msg):
+        self.feedback_msg = msg
+        self.feedback_time = time.time()
+
+    def process(self, frame, lm_list, hd_list):
+        h, w = frame.shape[:2]
+        composite = cv2.addWeighted(self.canvas.canvas, 0.65, frame, 0.35, 0)
+
+        tip = None
+        action = None
+        states_hud = None
+
+        if lm_list:
+            lm = lm_list[0]
+            label = hd_list[0][0].category_name if hd_list else "Right"
+            states = get_finger_states(lm, label)
+            states_hud = states
+            result = resolve_color(states)
+
+            if result is not None:
+                cname, cbgr = result
+
+                if cname == "LIMPAR":
+                    self._update_cmd("clear")
+                elif cname == "DESFAZER":
+                    self._update_cmd("undo")
+                else:
+                    self.cmd_name = None
+                    self.cmd_start = None
+                    self.cmd_progress = 0.0
+                    self.current_name = cname
+                    self.current_bgr = cbgr
+
+                    if states[1]:  # indicador levantado → desenha
+                        raw = (int(lm[8].x * w), int(lm[8].y * h))
+                        self.smooth_tip = smooth_pt(self.smooth_tip, raw)
+                        tip = self.smooth_tip
+
+                        if not self.drawing:
+                            self.canvas.begin_stroke()
+                            self.drawing = True
+
+                        if self.prev_tip is not None:
+                            self.canvas.draw(self.prev_tip, tip, cbgr, self.brush)
+                        self.trail.add(tip, cbgr)
+                        self.prev_tip = tip
+                    else:
+                        self.prev_tip = None
+                        self.smooth_tip = None
+                        self.drawing = False
+
+            elif states == (True, False, False, False, False):  # polegar = borracha
+                raw = (int(lm[4].x * w), int(lm[4].y * h))
+                self.smooth_tip = smooth_pt(self.smooth_tip, raw)
+                tip = self.smooth_tip
+                self.current_name = "Borracha"
+                self.current_bgr = None
+
+                if not self.drawing:
+                    self.canvas.begin_stroke()
+                    self.drawing = True
+
+                if self.prev_tip is not None:
+                    self.canvas.draw(self.prev_tip, tip, None, ERASER_SIZE)
+                self.prev_tip = tip
+                self.cmd_name = None
+                self.cmd_progress = 0.0
+            else:
+                self.prev_tip = None
+                self.smooth_tip = None
+                self.drawing = False
+                self.cmd_name = None
+                self.cmd_progress = 0.0
+        else:
+            self.prev_tip = None
+            self.smooth_tip = None
+            self.drawing = False
+            self.cmd_name = None
+            self.cmd_progress = 0.0
+
+        self.trail.draw(composite)
+
+        for btn in self.buttons:
+            if btn.update_hover(tip is not None and btn.contains(tip)):
+                action = btn.value
+            btn.draw(composite)
+
+        self._draw_hud(composite)
+
+        if tip:
+            cs = self.current_bgr if self.current_bgr else (200, 200, 200)
+            cv2.circle(composite, tip, self.brush, cs, -1)
+            cv2.circle(composite, tip, self.brush + 2, (0, 0, 0), 2)
+
+        if self.feedback_msg and (time.time() - self.feedback_time) < 2.5:
+            cv2.putText(composite, self.feedback_msg, (w//2 - 165, h//2),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 220, 255), 3, cv2.LINE_AA)
+
+        if self.cmd_progress > 0 and self.cmd_name is not None:
+            label_map = {"clear": "Limpando...", "undo": "Desfazendo..."}
+            lbl = label_map.get(self.cmd_name, self.cmd_name)
+            cv2.putText(composite, f"{lbl} {self.cmd_progress*100:.0f}%",
+                        (10, h - 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 220, 255), 2)
+            cv2.rectangle(composite, (10, h - 52), (310, h - 40), (50, 50, 50), -1)
+            cv2.rectangle(composite, (10, h - 52),
+                          (10 + int(300 * self.cmd_progress), h - 40), (0, 220, 255), -1)
+
+        if states_hud is not None:
+            draw_finger_hud(composite, states_hud, w - 155, h - 68)
+
+        # Processar acoes dos botoes
+        if action == "clear":
+            self.canvas.clear()
+            self.trail.clear()
+            self._feedback("Canvas Limpo!")
+            action = None
+        elif action == "save":
+            fname = f"pintura_{int(time.time())}.png"
+            cv2.imwrite(fname, self.canvas.canvas)
+            self._feedback(f"Salvo: {fname}")
+            action = None
+        elif action == "undo":
+            ok = self.canvas.undo()
+            self._feedback("Desfeito!" if ok else "Nada para desfazer")
+            action = None
+
+        return composite, action
+
+    def _update_cmd(self, cmd):
+        """Gerencia gesto de comando com confirmacao por tempo."""
+        if self.cmd_name != cmd:
+            self.cmd_name = cmd
+            self.cmd_start = time.time()
+            self.cmd_progress = 0.0
+            return
+        # BUGFIX: garante que cmd_start nunca e None neste ponto
+        if self.cmd_start is None:
+            self.cmd_start = time.time()
+        elapsed = time.time() - self.cmd_start
+        self.cmd_progress = min(1.0, elapsed / GESTURE_HOLD_SECS)
+        if elapsed >= GESTURE_HOLD_SECS:
+            done = self.cmd_name
+            self.cmd_name = None
+            self.cmd_start = None
+            self.cmd_progress = 0.0
+            if done == "clear":
+                self.canvas.clear()
+                self.trail.clear()
+                self._feedback("Canvas Limpo!")
+            elif done == "undo":
+                ok = self.canvas.undo()
+                self._feedback("Desfeito!" if ok else "Nada para desfazer")
+
+    def _draw_hud(self, frame):
+        h, w = frame.shape[:2]
+        cv2.rectangle(frame, (0, 0), (w, 50), (15, 15, 15), -1)
+        cv2.putText(frame, "PINTURA LIVRE", (10, 22),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.62, (255, 255, 255), 1, cv2.LINE_AA)
+        cs = self.current_bgr if self.current_bgr else (200, 200, 200)
+        cv2.circle(frame, (230, 14), 11, cs, -1)
+        cv2.circle(frame, (230, 14), 12, (255, 255, 255), 1)
+        cv2.putText(frame, self.current_name, (248, 20),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.58, (255, 255, 255), 1, cv2.LINE_AA)
+        cv2.putText(frame, f"Pincel:{self.brush}px", (420, 20),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.48, (180, 180, 180), 1, cv2.LINE_AA)
+        legenda = [
+            "I=Verm  M=Verd  A=Azul  Mi=Amar  I+M=Lara  I+A=Roxo",
+            "M+A=Ciano  I+M+A=Branco(apaga)  A+Mi=Desfaz  Pol=Borr",
+        ]
+        for i, txt in enumerate(legenda):
+            cv2.putText(frame, txt, (w - 490, 18 + i * 16),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.35, (170, 170, 170), 1, cv2.LINE_AA)
+
+
+# ─── EDU: QUIZ DE CORES ───────────────────────────────────────
+NAMED_COLORS = [
+    ("Vermelho", (0,   0,   255), (False, True,  False, False, False)),
+    ("Verde",    (0,   255, 0  ), (False, False, True,  False, False)),
+    ("Azul",     (255, 0,   0  ), (False, False, False, True,  False)),
+    ("Amarelo",  (0,   255, 255), (False, False, False, False, True )),
+    ("Laranja",  (0,   165, 255), (False, True,  True,  False, False)),
+    ("Roxo",     (128, 0,   128), (False, True,  False, True,  False)),
+    ("Ciano",    (255, 255, 0  ), (False, False, True,  True,  False)),
+]
+
+
+class EduColorsMode:
+    def __init__(self, W, H):
+        self.W = W
+        self.H = H
+        self.score = 0
+        self.total = 0
+        self.streak = 0
+        self.max_streak = 0
+        self.current = None
+        self.result_msg = ""
+        self.result_ok = True
+        self.result_time = 0.0
+        self.answer_cooldown = 0.0
+        self._new_question()
+        bw, bh = 138, 44
+        y = H - bh - 10
+        self.btn_menu = Button(W - bw - 10, y, bw, bh, "Menu",    (20, 20, 80), value="menu")
+        self.btn_next = Button(W - 2*bw - 20, y, bw, bh, "Proxima", (20, 80, 20), value="next")
+        self.buttons = [self.btn_menu, self.btn_next]
+        self.smooth_tip = None
+
+    def _new_question(self):
+        self.current = random.choice(NAMED_COLORS)
+        self.answer_cooldown = time.time() + 1.5
+
+    def process(self, frame, lm_list, hd_list):
+        h, w = frame.shape[:2]
+
+        # Garante que current nunca e None (dupla verificacao)
+        if self.current is None:
+            self._new_question()
+        if self.current is None:  # NAMED_COLORS vazio — nao deve ocorrer
+            return frame, None
+        name, bgr, combo = self.current
+
+        bg = np.zeros_like(frame)
+        cv2.rectangle(bg, (0, 0), (w, h), (10, 10, 22), -1)
+        cv2.addWeighted(bg, 0.72, frame, 0.28, 0, frame)
+
+        # Circulo da cor com pulso animado
+        cx, cy, r = w // 2, h // 2 - 52, 100
+        pulse = int(5 * abs(math.sin(time.time() * 2.8)))
+        cv2.circle(frame, (cx, cy), r + pulse, bgr, 7)
+        cv2.circle(frame, (cx, cy), r, bgr, -1)
+        cv2.circle(frame, (cx, cy), r + 3, (255, 255, 255), 3)
+
+        cv2.putText(frame, "Gesticule a combinacao de dedos para esta cor:",
+                    (w//2 - 310, cy - r - 32),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.65, (210, 210, 210), 1, cv2.LINE_AA)
+        cv2.putText(frame, name, (cx - 52, cy + r + 46),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.3, bgr, 3, cv2.LINE_AA)
+
+        hint = self._combo_hint(combo)
+        cv2.putText(frame, f"Dica: {hint}", (w//2 - 200, cy + r + 88),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (150, 150, 150), 1, cv2.LINE_AA)
+
+        cv2.putText(frame, f"Placar: {self.score}/{self.total}", (10, 38),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 220, 255), 2, cv2.LINE_AA)
+        sc = (0, 255, 100) if self.streak >= 3 else (190, 190, 190)
+        cv2.putText(frame, f"Seq: {self.streak}  (record: {self.max_streak})",
+                    (10, 64), cv2.FONT_HERSHEY_SIMPLEX, 0.52, sc, 1, cv2.LINE_AA)
+
+        tip = None
+        action = None
+        states_hud = None
+
+        if lm_list:
+            lm = lm_list[0]
+            label = hd_list[0][0].category_name if hd_list else "Right"
+            states = get_finger_states(lm, label)
+            states_hud = states
+
+            raw = get_index_tip(lm, frame.shape)
+            if raw:
+                self.smooth_tip = smooth_pt(self.smooth_tip, raw)
+                tip = self.smooth_tip
+                cv2.circle(frame, tip, 10, (0, 220, 255), -1)
+
+            if time.time() > self.answer_cooldown:
+                if states == combo:
+                    self.score += 1
+                    self.total += 1
+                    self.streak += 1
+                    self.max_streak = max(self.max_streak, self.streak)
+                    self.result_msg = f"CORRETO! +1  (seq:{self.streak})"
+                    self.result_ok = True
+                    self.result_time = time.time()
+                    self._new_question()
+                elif count_extended(states) > 0:
+                    self.total += 1
+                    self.streak = 0
+                    self.result_msg = f"Errado! Era: {hint}"
+                    self.result_ok = False
+                    self.result_time = time.time()
+                    self._new_question()
+        else:
+            self.smooth_tip = None
+
+        if self.result_msg and (time.time() - self.result_time) < 2.2:
+            col = (0, 255, 80) if self.result_ok else (0, 50, 255)
+            cv2.putText(frame, self.result_msg, (w//2 - 185, 98),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.9, col, 2, cv2.LINE_AA)
+
+        for btn in self.buttons:
+            if btn.update_hover(tip is not None and btn.contains(tip)):
+                action = btn.value
+            btn.draw(frame)
+
+        if action == "next":
+            self._new_question()
+            action = None
+
+        if states_hud is not None:
+            draw_finger_hud(frame, states_hud, w - 155, h - 68)
+
+        return frame, action
 
     @staticmethod
-    def get_mode_hint() -> str:
-        """Retorna instrucoes de uso sem teclado."""
-        return "Use um dedo por vez: indicador=vermelho, medio=verde, anelar=azul, mindinho=amarelo, polegar=borracha"
+    def _combo_hint(combo):
+        names = ["Polegar", "Indicador", "Medio", "Anelar", "Mindinho"]
+        parts = [n for n, s in zip(names, combo) if s]
+        return " + ".join(parts) if parts else "Nenhum"
 
 
-class HandLandmarkDetector:
-    """Detector de landmarks de mão com MediaPipe Tasks."""
+# ─── EDU: CONTAGEM DE DEDOS ───────────────────────────────────
+class EduCountMode:
+    def __init__(self, W, H):
+        self.W = W
+        self.H = H
+        self.target = 0
+        self.score = 0
+        self.total = 0
+        self.streak = 0
+        self.max_streak = 0
+        self.result_msg = ""
+        self.result_ok = True
+        self.result_time = 0.0
+        self.answer_cooldown = 0.0
+        self._new_question()
+        bw, bh = 138, 44
+        y = H - bh - 10
+        self.btn_menu = Button(W - bw - 10, y, bw, bh, "Menu", (20, 20, 80), value="menu")
+        self.buttons = [self.btn_menu]
+        self.smooth_tip = None
+        self.hold_start = None
+        self.last_n = -1
 
-    def __init__(
-        self,
-        model_path: str = MODEL_PATH,
-        max_num_hands: int = 2,
-        min_detection_conf: float = 0.5,
-        min_tracking_conf: float = 0.5,
-        output_video: str | None = None,
-        drawing_mode: bool = False,
-    ):
-        """Inicializa o detector."""
-        self.model_path = model_path
-        self.max_num_hands = max_num_hands
-        self.min_detection_conf = min_detection_conf
-        self.min_tracking_conf = min_tracking_conf
-        self.output_video = output_video
-        self.drawing_mode = drawing_mode
-        self.fps_clock = {"start": None, "frames": 0, "fps": 0.0}
-        self.prev_tip_pos: tuple[int, int] | None = None
-        self.smooth_tip_pos: tuple[int, int] | None = None
-        self.active_tip_index: int | None = None
-        self.command_name: str | None = None
-        self.command_start_time: float | None = None
-        self.command_progress: float = 0.0
+    def _new_question(self):
+        self.target = random.randint(0, 5)
+        self.answer_cooldown = time.time() + 1.5
+        self.hold_start = None
+        self.last_n = -1
 
-        # Baixa modelo se necessário
-        ensure_model(model_path)
+    def process(self, frame, lm_list, hd_list):
+        h, w = frame.shape[:2]
 
-        # Inicializa detector
-        base_options = python.BaseOptions(model_asset_path=model_path)
+        bg = np.zeros_like(frame)
+        cv2.rectangle(bg, (0, 0), (w, h), (10, 22, 10), -1)
+        cv2.addWeighted(bg, 0.72, frame, 0.28, 0, frame)
+
+        # Numero grande com sombra
+        ns = str(self.target)
+        cv2.putText(frame, ns, (w//2 - 52, h//2 - 8),
+                    cv2.FONT_HERSHEY_SIMPLEX, 6.5, (40, 40, 40), 18, cv2.LINE_AA)
+        cv2.putText(frame, ns, (w//2 - 52, h//2 - 8),
+                    cv2.FONT_HERSHEY_SIMPLEX, 6.5, (255, 255, 255), 10, cv2.LINE_AA)
+
+        cv2.putText(frame, "Levante esse numero de dedos!",
+                    (w//2 - 285, h//2 + 112),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.75, (200, 200, 200), 2, cv2.LINE_AA)
+        cv2.putText(frame, "(mantenha por 0.8s para confirmar)",
+                    (w//2 - 205, h//2 + 140),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (130, 130, 130), 1, cv2.LINE_AA)
+
+        cv2.putText(frame, f"Placar: {self.score}/{self.total}", (10, 38),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 220, 255), 2, cv2.LINE_AA)
+        sc = (0, 255, 100) if self.streak >= 3 else (190, 190, 190)
+        cv2.putText(frame, f"Seq: {self.streak}  (record: {self.max_streak})",
+                    (10, 64), cv2.FONT_HERSHEY_SIMPLEX, 0.52, sc, 1, cv2.LINE_AA)
+
+        tip = None
+        action = None
+        states_hud = None
+
+        if lm_list:
+            lm = lm_list[0]
+            label = hd_list[0][0].category_name if hd_list else "Right"
+            states = get_finger_states(lm, label)
+            states_hud = states
+            n = count_extended(states)
+
+            cv2.putText(frame, f"Seus dedos: {n}", (10, 98),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 220, 0), 2, cv2.LINE_AA)
+
+            raw = get_index_tip(lm, frame.shape)
+            if raw:
+                self.smooth_tip = smooth_pt(self.smooth_tip, raw)
+                tip = self.smooth_tip
+                cv2.circle(frame, tip, 10, (0, 220, 255), -1)
+
+            if time.time() > self.answer_cooldown:
+                if n == self.last_n:
+                    if self.hold_start is None:
+                        self.hold_start = time.time()
+                    held = time.time() - self.hold_start
+                    prog = min(1.0, held / 0.8)
+                    bx = w//2 - 100
+                    cv2.rectangle(frame, (bx, h//2 + 154), (bx + 200, h//2 + 167),
+                                  (50, 50, 50), -1)
+                    cv2.rectangle(frame, (bx, h//2 + 154),
+                                  (bx + int(200 * prog), h//2 + 167), (0, 220, 255), -1)
+                    if held >= 0.8:
+                        if n == self.target:
+                            self.score += 1
+                            self.total += 1
+                            self.streak += 1
+                            self.max_streak = max(self.max_streak, self.streak)
+                            self.result_msg = f"CERTO! {n} dedo(s)! seq:{self.streak}"
+                            self.result_ok = True
+                        else:
+                            self.total += 1
+                            self.streak = 0
+                            self.result_msg = f"Errado! Era {self.target}"
+                            self.result_ok = False
+                        self.result_time = time.time()
+                        self._new_question()
+                else:
+                    self.hold_start = None
+                self.last_n = n
+        else:
+            self.smooth_tip = None
+            self.hold_start = None
+            self.last_n = -1
+
+        if self.result_msg and (time.time() - self.result_time) < 2.2:
+            col = (0, 255, 80) if self.result_ok else (0, 50, 255)
+            cv2.putText(frame, self.result_msg, (w//2 - 205, 98),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.9, col, 2, cv2.LINE_AA)
+
+        for btn in self.buttons:
+            if btn.update_hover(tip is not None and btn.contains(tip)):
+                action = btn.value
+            btn.draw(frame)
+
+        if states_hud is not None:
+            draw_finger_hud(frame, states_hud, w - 155, h - 68)
+
+        return frame, action
+
+
+# ─── FISIOTERAPIA ─────────────────────────────────────────────
+class PhysioExercise(Enum):
+    OPEN_CLOSE   = "Abrir e Fechar Mao"
+    FINGER_TOUCH = "Toque de Dedos (Pinca)"
+    FINGER_WAVE  = "Onda de Dedos"
+
+
+class PhysioMode:
+    EXERCISES   = [PhysioExercise.OPEN_CLOSE,
+                   PhysioExercise.FINGER_TOUCH,
+                   PhysioExercise.FINGER_WAVE]
+    REPS_TARGET = 8
+
+    def __init__(self, W, H):
+        self.W = W
+        self.H = H
+        self.exercise_idx = 0
+        self.reps = 0
+        self.phase = "abrir"
+        self.wave_idx = 0
+        self.wave_state = False
+        self.last_state = None
+        self.result_msg = ""
+        self.result_time = 0.0
+        self.cooldown = 0.0
+        self.session_start = time.time()
+        self.rep_history = []
+        bw, bh = 138, 44
+        y = H - bh - 10
+        self.btn_menu = Button(W - bw - 10, y, bw, bh, "Menu",   (20, 20, 80),  value="menu")
+        self.btn_next = Button(W - 2*bw - 20, y, bw, bh, "Proximo", (60, 60, 15), value="next")
+        self.buttons = [self.btn_menu, self.btn_next]
+        self.smooth_tip = None
+
+    @property
+    def current_exercise(self):
+        return self.EXERCISES[self.exercise_idx]
+
+    def _next_exercise(self):
+        self.exercise_idx = (self.exercise_idx + 1) % len(self.EXERCISES)
+        self.reps = 0
+        self.phase = "abrir"
+        self.wave_idx = 0
+        self.wave_state = False
+        self.last_state = None
+        self.rep_history = []
+        self.cooldown = time.time() + 1.0
+
+    def _add_rep(self):
+        now = time.time()
+        self.rep_history = [t for t in self.rep_history if now - t < 10]
+        self.rep_history.append(now)
+        self.reps += 1
+        self.result_msg = f"Rep {self.reps}!"
+        self.result_time = now
+
+    def process(self, frame, lm_list, hd_list):
+        h, w = frame.shape[:2]
+
+        bg = np.zeros_like(frame)
+        cv2.rectangle(bg, (0, 0), (w, h), (22, 10, 10), -1)
+        cv2.addWeighted(bg, 0.65, frame, 0.35, 0, frame)
+
+        ex = self.current_exercise
+        cv2.putText(frame, "FISIOTERAPIA", (10, 32),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 220, 255), 2, cv2.LINE_AA)
+        cv2.putText(frame, ex.value, (10, 62),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.85, (255, 255, 255), 2, cv2.LINE_AA)
+
+        # Barra de reps
+        prog = min(1.0, self.reps / self.REPS_TARGET)
+        bar_col = (0, 255, 80) if self.reps >= self.REPS_TARGET else (0, 200, 80)
+        cv2.rectangle(frame, (10, 76), (w - 10, 96), (50, 50, 50), -1)
+        cv2.rectangle(frame, (10, 76), (10 + int((w - 20) * prog), 96), bar_col, -1)
+        cv2.putText(frame, f"{self.reps}/{self.REPS_TARGET} reps", (10, 114),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200, 255, 200), 1, cv2.LINE_AA)
+
+        cv2.putText(frame, f"Ex {self.exercise_idx+1}/{len(self.EXERCISES)}",
+                    (w - 115, 32), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (155, 155, 155), 1, cv2.LINE_AA)
+
+        # Timer de sessao
+        m, s = divmod(int(time.time() - self.session_start), 60)
+        cv2.putText(frame, f"Sessao: {m:02d}:{s:02d}", (10, h - 178),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.58, (170, 170, 170), 1, cv2.LINE_AA)
+
+        for i, line in enumerate(self._get_instructions(ex)):
+            cv2.putText(frame, line, (10, 140 + i * 28),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.58, (200, 200, 200), 1, cv2.LINE_AA)
+
+        tip = None
+        action = None
+        states_hud = None
+
+        if lm_list and time.time() > self.cooldown:
+            lm = lm_list[0]
+            label = hd_list[0][0].category_name if hd_list else "Right"
+            states = get_finger_states(lm, label)
+            states_hud = states
+            n = count_extended(states)
+
+            raw = get_index_tip(lm, frame.shape)
+            if raw:
+                self.smooth_tip = smooth_pt(self.smooth_tip, raw)
+                tip = self.smooth_tip
+
+            if ex == PhysioExercise.OPEN_CLOSE:
+                self._detect_open_close(states, n)
+            elif ex == PhysioExercise.FINGER_TOUCH:
+                self._detect_finger_touch(lm, frame.shape)
+            elif ex == PhysioExercise.FINGER_WAVE:
+                self._detect_finger_wave(states)
+
+            self._draw_finger_indicators(frame, states, w, h)
+
+            if tip:
+                cv2.circle(frame, tip, 10, (0, 220, 255), -1)
+        else:
+            self.smooth_tip = None
+
+        # Ritmo
+        if len(self.rep_history) >= 2:
+            span = self.rep_history[-1] - self.rep_history[0]
+            if span > 0:
+                rpm = len(self.rep_history) / span * 60
+                cv2.putText(frame, f"Ritmo: {rpm:.0f} rep/min", (w - 230, 62),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.58, (255, 220, 0), 1, cv2.LINE_AA)
+
+        # Celebracao ao completar
+        if self.reps >= self.REPS_TARGET:
+            ov = frame.copy()
+            cv2.rectangle(ov, (0, 0), (w, h), (0, 55, 0), -1)
+            cv2.addWeighted(ov, 0.28, frame, 0.72, 0, frame)
+            cv2.putText(frame, "EXERCICIO CONCLUIDO!", (w//2 - 245, h//2),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1.3, (0, 255, 80), 3, cv2.LINE_AA)
+            cv2.putText(frame, "Avance para o proximo exercicio!",
+                        (w//2 - 205, h//2 + 50),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.75, (180, 255, 180), 2, cv2.LINE_AA)
+
+        if self.result_msg and (time.time() - self.result_time) < 1.2:
+            cv2.putText(frame, self.result_msg, (w//2 - 65, h - 130),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1.1, (0, 255, 150), 3, cv2.LINE_AA)
+
+        for btn in self.buttons:
+            if btn.update_hover(tip is not None and btn.contains(tip)):
+                action = btn.value
+            btn.draw(frame)
+
+        if action == "next":
+            self._next_exercise()
+            action = None
+
+        if states_hud is not None:
+            draw_finger_hud(frame, states_hud, w - 155, h - 68)
+
+        return frame, action
+
+    def _detect_open_close(self, states, n):
+        if self.phase == "abrir" and n >= 4:
+            self.phase = "fechar"
+            self.cooldown = time.time() + 0.4
+        elif self.phase == "fechar" and n == 0:
+            self.phase = "abrir"
+            self._add_rep()
+            self.cooldown = time.time() + 0.4
+
+    def _detect_finger_touch(self, lm, frame_shape):
+        h, w = frame_shape[:2]
+        tx, ty = int(lm[4].x * w), int(lm[4].y * h)
+        ix, iy = int(lm[8].x * w), int(lm[8].y * h)
+        touching = math.hypot(tx - ix, ty - iy) < 40
+        if touching and self.last_state != "touching":
+            self._add_rep()
+            self.cooldown = time.time() + 0.5
+        self.last_state = "touching" if touching else "open"
+
+    def _detect_finger_wave(self, states):
+        wave = [1, 2, 3, 4]
+        exp = wave[self.wave_idx]
+        if states[exp] and not self.wave_state:
+            self.wave_state = True
+        elif not states[exp] and self.wave_state:
+            self.wave_state = False
+            self.wave_idx += 1
+            if self.wave_idx >= len(wave):
+                self.wave_idx = 0
+                self._add_rep()
+
+    def _draw_finger_indicators(self, frame, states, w, h):
+        labels = ["P", "I", "M", "A", "Mi"]
+        by = h - 163
+        for i, (label, up) in enumerate(zip(labels, states)):
+            x = 18 + i * 52
+            col = (0, 220, 100) if up else (58, 58, 58)
+            cv2.rectangle(frame, (x, by - 32), (x + 44, by), col, -1)
+            cv2.rectangle(frame, (x, by - 32), (x + 44, by), (145, 145, 145), 1)
+            cv2.putText(frame, label, (x + 12, by - 10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.58, (255, 255, 255), 1, cv2.LINE_AA)
+        cv2.putText(frame, f"Fase: {self.phase.upper()}", (310, h - 148),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.58, (0, 220, 255), 1, cv2.LINE_AA)
+
+    @staticmethod
+    def _get_instructions(ex):
+        if ex == PhysioExercise.OPEN_CLOSE:
+            return [
+                "1. Abra a mao completamente (4+ dedos levantados)",
+                "2. Feche em punho (0 dedos levantados)",
+                "3. Repita suavemente, sem forcar",
+            ]
+        if ex == PhysioExercise.FINGER_TOUCH:
+            return [
+                "1. Toque o polegar na ponta do indicador",
+                "2. Forme uma pinca e solte",
+                "3. Movimento lento e controlado",
+            ]
+        if ex == PhysioExercise.FINGER_WAVE:
+            return [
+                "1. Levante o indicador, abaixe",
+                "2. Levante o medio, abaixe",
+                "3. Repita com anelar e mindinho em sequencia",
+            ]
+        return []
+
+
+# ─── APP PRINCIPAL ────────────────────────────────────────────
+class Spectra:
+    def __init__(self):
+        ensure_model(MODEL_PATH)
+        base_options = python.BaseOptions(model_asset_path=MODEL_PATH)
         options = vision.HandLandmarkerOptions(
             base_options=base_options,
-            num_hands=max_num_hands,
-            min_hand_detection_confidence=min_detection_conf,
-            min_hand_presence_confidence=min_tracking_conf,
-            min_tracking_confidence=min_tracking_conf,
+            num_hands=2,
+            min_hand_detection_confidence=0.5,
+            min_hand_presence_confidence=0.5,
+            min_tracking_confidence=0.5,
         )
         self.detector = vision.HandLandmarker.create_from_options(options)
+        self.app_mode = AppMode.MENU
+        self.handlers: dict = {}
+        self.fps = {"start": None, "n": 0, "val": 0.0}
 
-        # Canvas de desenho (será inicializado depois com tamanho correto)
-        self.canvas = None
-
-    def get_single_extended_finger(self, hand_landmarks) -> tuple[str | None, int | None]:
-        """Retorna qual dedo unico esta estendido (ou None se nenhum/mais de um)."""
-        extended = self.get_finger_states(hand_landmarks)
-        up = [name for name, is_up in extended.items() if is_up]
-        tip_idx = {"thumb": 4, "index": 8, "middle": 12, "ring": 16, "pinky": 20}
-        if len(up) == 1:
-            return up[0], tip_idx[up[0]]
-        return None, None
-
-    def get_finger_states(self, hand_landmarks) -> dict[str, bool]:
-        """Retorna estado estendido/recolhido dos dedos."""
-        return {
-            "thumb": is_finger_extended(hand_landmarks, 4, 3),
-            "index": is_finger_extended(hand_landmarks, 8, 6),
-            "middle": is_finger_extended(hand_landmarks, 12, 10),
-            "ring": is_finger_extended(hand_landmarks, 16, 14),
-            "pinky": is_finger_extended(hand_landmarks, 20, 18),
+    def _init_handlers(self, W, H):
+        self.handlers = {
+            AppMode.MENU:       MenuMode(W, H),
+            AppMode.PAINT:      PaintMode(W, H),
+            AppMode.EDU_COLORS: EduColorsMode(W, H),
+            AppMode.EDU_COUNT:  EduCountMode(W, H),
+            AppMode.PHYSIO:     PhysioMode(W, H),
         }
 
-    def detect_command_gesture(self, states: dict[str, bool]) -> str | None:
-        """Detecta gestos de comando (sem teclado)."""
-        # Salvar: indicador + medio
-        if states["index"] and states["middle"] and not states["ring"] and not states["pinky"]:
-            return "save"
-        # Limpar: mao aberta (4 dedos principais)
-        if states["index"] and states["middle"] and states["ring"] and states["pinky"]:
-            return "clear"
-        # Sair: punho fechado (nenhum dedo)
-        if not any(states.values()):
-            return "exit"
-        return None
+    def _detect(self, frame):
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        mp_img = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+        res = self.detector.detect(mp_img)
+        return (res.hand_landmarks or []), (res.handedness or [])
 
-    def apply_command(self, command: str) -> None:
-        """Aplica comando por gesto."""
-        if not self.canvas:
-            return
-        if command == "save":
-            filename = f"drawing_{int(time.time())}.jpg"
-            cv2.imwrite(filename, self.canvas.canvas)
-            print(f"Desenho salvo: {filename}")
-        elif command == "clear":
-            self.canvas.clear()
-            print("Canvas limpo")
-        elif command == "exit":
-            raise KeyboardInterrupt()
-
-    def update_command_hold(self, command: str | None) -> None:
-        """Controla confirmacao por tempo para evitar falsos positivos."""
-        if command is None:
-            self.command_name = None
-            self.command_start_time = None
-            self.command_progress = 0.0
-            return
-
-        if self.command_name != command:
-            self.command_name = command
-            self.command_start_time = time.time()
-            self.command_progress = 0.0
-            return
-
-        if self.command_start_time is None:
-            self.command_start_time = time.time()
-
-        elapsed = time.time() - self.command_start_time
-        self.command_progress = min(1.0, elapsed / GESTURE_HOLD_SECONDS)
-        if elapsed >= GESTURE_HOLD_SECONDS:
-            cmd = self.command_name
-            self.command_name = None
-            self.command_start_time = None
-            self.command_progress = 0.0
-            if cmd:
-                self.apply_command(cmd)
-
-    def smooth_point(self, pt: tuple[int, int]) -> tuple[int, int]:
-        """Aplica suavizacao exponencial para reduzir tremor do cursor."""
-        if self.smooth_tip_pos is None:
-            self.smooth_tip_pos = pt
-            return pt
-        sx, sy = self.smooth_tip_pos
-        nx = int((1.0 - SMOOTH_ALPHA) * sx + SMOOTH_ALPHA * pt[0])
-        ny = int((1.0 - SMOOTH_ALPHA) * sy + SMOOTH_ALPHA * pt[1])
-        self.smooth_tip_pos = (nx, ny)
-        return self.smooth_tip_pos
-
-    def process_frame(self, frame: np.ndarray) -> tuple[np.ndarray, object]:
-        """Processa um frame e detecta landmarks."""
-        # Inicializa canvas na primeira vez
-        if self.canvas is None and self.drawing_mode:
-            h, w = frame.shape[:2]
-            self.canvas = DrawingCanvas(w, h)
-
-        # Converte para RGB
-        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        
-        # Cria imagem MediaPipe
-        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame_rgb)
-        
-        # Detecta landmarks
-        result = self.detector.detect(mp_image)
-        
-        frame_annotated = frame.copy()
-        h, w = frame.shape[:2]
-        detected_command = None
-
-        # Desenha landmarks e lógica de desenho
-        if result.hand_landmarks:
-            for hand_landmarks, handedness in zip(result.hand_landmarks, result.handedness):
-                # Lista de conexões das mãos
-                HAND_CONNECTIONS = [
-                    (0, 1), (1, 2), (2, 3), (3, 4),  # Polegar
-                    (5, 6), (6, 7), (7, 8),          # Indicador
-                    (9, 10), (10, 11), (11, 12),    # Dedo médio
-                    (13, 14), (14, 15), (15, 16),   # Dedo anelar
-                    (17, 18), (18, 19), (19, 20),   # Mindinho
-                    (0, 5), (5, 9), (9, 13), (13, 17),  # Palma
-                ]
-                
-                # Desenha conexões
-                for start, end in HAND_CONNECTIONS:
-                    x1 = int(hand_landmarks[start].x * w)
-                    y1 = int(hand_landmarks[start].y * h)
-                    x2 = int(hand_landmarks[end].x * w)
-                    y2 = int(hand_landmarks[end].y * h)
-                    cv2.line(frame_annotated, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                
-                # Desenha pontos
-                for landmark in hand_landmarks:
-                    x = int(landmark.x * w)
-                    y = int(landmark.y * h)
-                    cv2.circle(frame_annotated, (x, y), 4, (255, 0, 0), -1)
-                
-                # Lógica de desenho (modo pincel)
-                if self.drawing_mode and self.canvas:
-                    states = self.get_finger_states(hand_landmarks)
-                    detected_command = self.detect_command_gesture(states)
-
-                    finger_name, tip_idx = self.get_single_extended_finger(hand_landmarks)
-
-                    if finger_name and tip_idx is not None:
-                        raw_tip = get_finger_position(hand_landmarks, tip_idx, frame.shape)
-                        tip_pos = self.smooth_point(raw_tip)
-
-                        self.canvas.set_mode(FINGER_TO_MODE[finger_name])
-                        color = COLORS.get(self.canvas.mode, (0, 0, 255))
-
-                        if self.active_tip_index != tip_idx:
-                            self.prev_tip_pos = None
-
-                        if self.prev_tip_pos is not None:
-                            self.canvas.draw_line(
-                                self.prev_tip_pos,
-                                tip_pos,
-                                self.canvas.brush_size,
-                                color,
-                            )
-                        self.canvas.draw_point(tip_pos, self.canvas.brush_size, color)
-                        self.prev_tip_pos = tip_pos
-                        self.active_tip_index = tip_idx
-                    else:
-                        self.prev_tip_pos = None
-                        self.smooth_tip_pos = None
-                        self.active_tip_index = None
-                
-                # Label da mão
-                hand_label = handedness[0].category_name
-                conf = handedness[0].score
-                
-                wrist = hand_landmarks[0]
-                x, y = int(wrist.x * w), int(wrist.y * h)
-                cv2.putText(
-                    frame_annotated,
-                    f"{hand_label} ({conf:.2f})",
-                    (x - 20, y - 20),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.6,
-                    (0, 255, 0),
-                    2,
-                )
-        else:
-            self.prev_tip_pos = None
-            self.smooth_tip_pos = None
-            self.active_tip_index = None
-
-        if self.drawing_mode:
-            self.update_command_hold(detected_command)
-
-        return frame_annotated, result
-
-    def draw_fps(self, frame: np.ndarray) -> np.ndarray:
-        """Desenha FPS no frame."""
-        if self.fps_clock["start"] is None:
-            self.fps_clock["start"] = time.time()
-
-        self.fps_clock["frames"] += 1
-        elapsed = time.time() - self.fps_clock["start"]
-
+    def _draw_fps(self, frame):
+        if self.fps["start"] is None:
+            self.fps["start"] = time.time()
+        self.fps["n"] += 1
+        elapsed = time.time() - self.fps["start"]
         if elapsed > 1.0:
-            self.fps_clock["fps"] = self.fps_clock["frames"] / elapsed
-            self.fps_clock["frames"] = 0
-            self.fps_clock["start"] = time.time()
+            self.fps["val"] = self.fps["n"] / elapsed
+            self.fps["n"] = 0
+            self.fps["start"] = time.time()
+        cv2.putText(frame, f"FPS:{self.fps['val']:.0f}",
+                    (frame.shape[1] - 78, 18),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.46, (110, 110, 110), 1)
 
-        cv2.putText(
-            frame,
-            f"FPS: {self.fps_clock['fps']:.1f}",
-            (10, 30),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.8,
-            (0, 255, 0),
-            2,
-        )
-        return frame
-
-    def run_drawing_mode(self) -> None:
-        """Executa modo de pintura com as mãos."""
+    def run(self):
         cap = cv2.VideoCapture(0)
-
         if not cap.isOpened():
-            raise RuntimeError(
-                "❌ Não foi possível abrir a webcam. Verifique se ela está conectada."
-            )
-
-        print("✓ Modo de Pintura Ativado!")
-        print("Controles apenas pela camera:")
-        print("- Cor por dedo: indicador=vermelho, medio=verde, anelar=azul, mindinho=amarelo, polegar=borracha")
-        print("- Salvar: indicador + medio por 1.2s")
-        print("- Limpar: mao aberta por 1.2s")
-        print("- Sair: punho fechado por 1.2s")
-
+            raise RuntimeError("Nao foi possivel abrir a webcam.")
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
         cap.set(cv2.CAP_PROP_FPS, 30)
+
+        ok, first = cap.read()
+        if not ok:
+            raise RuntimeError("Nao foi possivel ler o primeiro frame.")
+        H, W = cv2.flip(first, 1).shape[:2]
+        self._init_handlers(W, H)
+
+        print("SPECTRA iniciado.")
+        print("Aponte o indicador e segure sobre os botoes para navegar.")
 
         try:
             while True:
                 ok, frame = cap.read()
                 if not ok:
-                    print("❌ Falha ao ler frame da webcam")
                     break
-
-                # Espelha a imagem horizontalmente para melhor experiência
                 frame = cv2.flip(frame, 1)
 
-                frame_annotated, result = self.process_frame(frame)
-                frame_annotated = self.draw_fps(frame_annotated)
+                lm_list, hd_list = self._detect(frame)
+                handler = self.handlers[self.app_mode]
+                frame_out, action = handler.process(frame, lm_list, hd_list)
 
-                # Composição: mistura o canvas com a câmera
-                if self.canvas:
-                    alpha = 0.7
-                    frame_annotated = cv2.addWeighted(
-                        self.canvas.canvas, alpha,
-                        frame_annotated, 1 - alpha,
-                        0
-                    )
-
-                    cv2.putText(
-                        frame_annotated,
-                        self.canvas.get_mode_display(),
-                        (10, 64),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.8,
-                        (0, 255, 0),
-                        2,
-                    )
-                    cv2.putText(
-                        frame_annotated,
-                        self.canvas.get_mode_hint(),
-                        (10, 92),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.5,
-                        (255, 255, 255),
-                        1,
-                    )
-
-                    if self.command_name is not None:
-                        msg = f"Gesto: {self.command_name.upper()} ({self.command_progress * 100:.0f}%)"
-                        cv2.putText(
-                            frame_annotated,
-                            msg,
-                            (10, 120),
-                            cv2.FONT_HERSHEY_SIMPLEX,
-                            0.7,
-                            (0, 220, 255),
-                            2,
-                        )
-                        cv2.rectangle(frame_annotated, (10, 130), (310, 142), (50, 50, 50), -1)
-                        cv2.rectangle(
-                            frame_annotated,
-                            (10, 130),
-                            (10 + int(300 * self.command_progress), 142),
-                            (0, 220, 255),
-                            -1,
-                        )
-
-                cv2.imshow("🎨 Pintor de Mão MediaPipe", frame_annotated)
+                self._draw_fps(frame_out)
+                cv2.imshow("SPECTRA", frame_out)
                 cv2.waitKey(1)
 
+                if action == "quit":
+                    break
+                elif action == "menu":
+                    self.app_mode = AppMode.MENU
+                    self.handlers[AppMode.MENU] = MenuMode(W, H)
+                elif isinstance(action, AppMode):
+                    self.app_mode = action
+
         except KeyboardInterrupt:
-            print("Encerrando modo de pintura (botao SAIR)")
-
+            pass
         finally:
             cap.release()
             cv2.destroyAllWindows()
             self.detector.close()
-
-    def run_webcam(self) -> None:
-        """Executa detecção em tempo real da webcam."""
-        cap = cv2.VideoCapture(0)
-
-        if not cap.isOpened():
-            raise RuntimeError(
-                "❌ Não foi possível abrir a webcam. Verifique se ela está conectada."
-            )
-
-        print("✓ Webcam aberta com sucesso")
-        print("📷 Pressione 'q' para sair, 's' para salvar frame")
-
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
-        cap.set(cv2.CAP_PROP_FPS, 30)
-
-        writer = None
-        if self.output_video:
-            fourcc = cv2.VideoWriter_fourcc(*"mp4v")  # type: ignore
-            fps = cap.get(cv2.CAP_PROP_FPS)
-            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-            writer = cv2.VideoWriter(self.output_video, fourcc, fps, (width, height))
-            print(f"💾 Gravando em: {self.output_video}")
-
-        try:
-            while True:
-                ok, frame = cap.read()
-                if not ok:
-                    print("❌ Falha ao ler frame da webcam")
-                    break
-
-                frame_annotated, result = self.process_frame(frame)
-                frame_annotated = self.draw_fps(frame_annotated)
-
-                if writer:
-                    writer.write(frame_annotated)
-
-                cv2.imshow("MediaPipe Hand Landmarks Detector", frame_annotated)
-
-                key = cv2.waitKey(1) & 0xFF
-                if key == ord("q"):
-                    print("👋 Encerrando...")
-                    break
-                elif key == ord("s"):
-                    filename = f"hand_detection_{int(time.time())}.jpg"
-                    cv2.imwrite(filename, frame_annotated)
-                    print(f"💾 Frame salvo: {filename}")
-
-        finally:
-            if writer:
-                writer.release()
-                print(f"✓ Vídeo salvo: {self.output_video}")
-            cap.release()
-            cv2.destroyAllWindows()
-            self.detector.close()
-
-    def process_image(self, image_path: str) -> None:
-        """Processa uma imagem estática."""
-        if not os.path.exists(image_path):
-            raise FileNotFoundError(f"Imagem não encontrada: {image_path}")
-
-        frame = cv2.imread(image_path)
-        if frame is None:
-            raise ValueError(f"Erro ao ler imagem: {image_path}")
-
-        print(f"📷 Processando imagem: {image_path}")
-
-        frame_annotated, result = self.process_frame(frame)
-
-        if result.hand_landmarks:  # type: ignore
-            print(f"✓ {len(result.hand_landmarks)} mão(s) detectada(s)")  # type: ignore
-        else:
-            print("⚠ Nenhuma mão detectada")
-
-        cv2.imshow("MediaPipe Hand Detection", frame_annotated)
-        print("Pressione qualquer tecla para fechar")
-        cv2.waitKey(0)
-        cv2.destroyAllWindows()
-
-        output_path = Path(image_path).stem + "_detected.jpg"
-        cv2.imwrite(output_path, frame_annotated)
-        print(f"💾 Resultado salvo: {output_path}")
-
-
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="🎯 Detector de Hand Landmarks com MediaPipe Tasks - Pintura, Detecção e Imagens",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Exemplos de uso:
-  Webcam padrão (detecção):
-    python spectra.py
-
-  Modo de Pintura com as mãos:
-    python spectra.py --draw
-
-  Webcam com mais confiança:
-    python spectra.py --min-detection-conf 0.7
-
-  Gravando vídeo:
-    python spectra.py --output video_saida.mp4
-
-  Processando imagem:
-    python spectra.py --image imagem.jpg
-
-  Modo Pintura com cores personalizadas:
-    python spectra.py --draw --min-detection-conf 0.6
-        """,
-    )
-
-    mode_group = parser.add_mutually_exclusive_group()
-    mode_group.add_argument(
-        "--image",
-        type=str,
-        help="Caminho para imagem a processar",
-    )
-
-    parser.add_argument(
-        "--model",
-        type=str,
-        default=MODEL_PATH,
-        help="Caminho para o modelo hand_landmarker.task",
-    )
-    parser.add_argument(
-        "--max-hands",
-        type=int,
-        default=2,
-        help="Número máximo de mãos a detectar (padrão: 2)",
-    )
-    parser.add_argument(
-        "--min-detection-conf",
-        type=float,
-        default=0.5,
-        help="Confiança mínima para detecção (0-1, padrão: 0.5)",
-    )
-    parser.add_argument(
-        "--min-tracking-conf",
-        type=float,
-        default=0.5,
-        help="Confiança mínima para rastreamento (0-1, padrão: 0.5)",
-    )
-    parser.add_argument(
-        "--output",
-        type=str,
-        help="Caminho para salvar vídeo de saída",
-    )
-    parser.add_argument(
-        "--draw",
-        action="store_true",
-        help="Ativa modo de pintura com as mãos",
-    )
-
-    return parser.parse_args()
+            print("SPECTRA encerrado.")
 
 
 if __name__ == "__main__":
-    args = parse_args()
-
-    try:
-        detector = HandLandmarkDetector(
-            model_path=args.model,
-            max_num_hands=args.max_hands,
-            min_detection_conf=args.min_detection_conf,
-            min_tracking_conf=args.min_tracking_conf,
-            output_video=args.output,
-            drawing_mode=args.draw,
-        )
-
-        if args.draw:
-            detector.run_drawing_mode()
-        elif args.image:
-            detector.process_image(args.image)
-        else:
-            detector.run_webcam()
-
-    except Exception as e:
-        print(f"❌ Erro: {e}")
-        exit(1)
+    Spectra().run()

@@ -21,6 +21,11 @@ from enum import Enum
 import cv2
 import mediapipe as mp
 import numpy as np
+import csv
+try:
+    import winsound
+except Exception:
+    winsound = None
 
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
@@ -188,32 +193,53 @@ class Trail:
 def get_finger_states(lm, hand_label="Right"):
     """
     Retorna (polegar, indicador, medio, anelar, mindinho) True=levantado.
-    Usa eixo-X para o polegar (mais confiavel que eixo-Y).
+    Usa pequenos thresholds para tolerancia a deteccoes ruidosas.
     """
+    # tolerancias em coordenadas normalizadas
+    TY = 0.02
+    TX = 0.02
     if hand_label == "Right":
-        thumb = lm[4].x < lm[3].x   # polegar vai para esquerda (mao direita espelhada)
+        thumb = lm[4].x < lm[3].x - TX
     else:
-        thumb = lm[4].x > lm[3].x
-    index  = lm[8].y  < lm[6].y
-    middle = lm[12].y < lm[10].y
-    ring   = lm[16].y < lm[14].y
-    pinky  = lm[20].y < lm[18].y
+        thumb = lm[4].x > lm[3].x + TX
+    index  = lm[8].y  < lm[6].y - TY
+    middle = lm[12].y < lm[10].y - TY
+    ring   = lm[16].y < lm[14].y - TY
+    pinky  = lm[20].y < lm[18].y - TY
     return (thumb, index, middle, ring, pinky)
 
 
 def get_index_tip(lm, frame_shape):
     """Posicao da ponta do indicador em pixels, ou None."""
     h, w = frame_shape[:2]
-    if lm[8].y < lm[6].y:
+    # add small tolerance so slightly bent finger still counts
+    if lm[8].y < lm[6].y + 0.03:
         return (int(lm[8].x * w), int(lm[8].y * h))
     return None
 
 
 def resolve_color(states):
+    if states is None:
+        return None
+    s = tuple(bool(x) for x in states)
     for combo, name, bgr in COMBO_COLORS:
-        if states == combo:
+        if s == combo:
             return (name, bgr)
     return None
+
+
+def get_hand_label(hd_list, idx=0):
+    """Extrai rotulo de handedness de forma tolerante, retorna 'Right' por padrao."""
+    try:
+        entry = hd_list[idx]
+        # hd_list pode ser lista de categorias ou entradas aninhadas
+        if isinstance(entry, (list, tuple)) and len(entry) > 0:
+            cat = entry[0]
+        else:
+            cat = entry
+        return getattr(cat, "category_name", "Right")
+    except Exception:
+        return "Right"
 
 
 def count_extended(states):
@@ -237,6 +263,38 @@ def draw_finger_hud(frame, states, x0, y0):
         cv2.circle(frame, (cx, y0), 11, (180, 180, 180), 1)
         cv2.putText(frame, label, (cx - 6, y0 + 4),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.33, (255, 255, 255), 1, cv2.LINE_AA)
+
+
+def _beep_ok():
+    if winsound:
+        try:
+            winsound.Beep(880, 120)
+        except Exception:
+            pass
+
+
+def _beep_err():
+    if winsound:
+        try:
+            winsound.Beep(440, 160)
+        except Exception:
+            pass
+
+
+def make_mode_buttons(W, H, include_next=False, right_align=True):
+    bw, bh = 138, 44
+    y = H - bh - 10
+    buttons = []
+    # Right-aligned: [Next] [Voltar] [Sair]
+    if include_next:
+        # place next, voltar, sair from left to right starting at W-3*bw-30
+        buttons.append(Button(W - 3*bw - 30, y, bw, bh, "Proximo", (60, 60, 15), value="next"))
+        buttons.append(Button(W - 2*bw - 20, y, bw, bh, "Voltar", (20, 20, 80), value="menu"))
+        buttons.append(Button(W - bw - 10, y, bw, bh, "Sair", (120, 15, 15), value="quit"))
+    else:
+        buttons.append(Button(W - 2*bw - 20, y, bw, bh, "Voltar", (20, 20, 80), value="menu"))
+        buttons.append(Button(W - bw - 10, y, bw, bh, "Sair", (120, 15, 15), value="quit"))
+    return buttons
 
 
 # ─── MENU ─────────────────────────────────────────────────────
@@ -271,7 +329,7 @@ class MenuMode:
         states = None
         if lm_list:
             lm = lm_list[0]
-            label = hd_list[0][0].category_name if hd_list else "Right"
+            label = get_hand_label(hd_list)
             states = get_finger_states(lm, label)
             raw = get_index_tip(lm, frame.shape)
             if raw:
@@ -318,8 +376,9 @@ class PaintMode:
             Button(10,       y, bw, bh, "Limpar",   (80, 20, 20),  value="clear"),
             Button(130,      y, bw, bh, "Salvar",   (20, 70, 20),  value="save"),
             Button(250,      y, bw, bh, "Desfazer", (80, 60, 10),  value="undo"),
-            Button(370,      y, bw, bh, "Menu",     (20, 20, 80),  value="menu"),
         ]
+        # adiciona botoes padrao (Voltar/Sair)
+        self.buttons += make_mode_buttons(W, H, include_next=False)
 
     def _feedback(self, msg):
         self.feedback_msg = msg
@@ -335,7 +394,7 @@ class PaintMode:
 
         if lm_list:
             lm = lm_list[0]
-            label = hd_list[0][0].category_name if hd_list else "Right"
+            label = get_hand_label(hd_list)
             states = get_finger_states(lm, label)
             states_hud = states
             result = resolve_color(states)
@@ -521,16 +580,17 @@ class EduColorsMode:
         self.result_time = 0.0
         self.answer_cooldown = 0.0
         self._new_question()
-        bw, bh = 138, 44
-        y = H - bh - 10
-        self.btn_menu = Button(W - bw - 10, y, bw, bh, "Menu",    (20, 20, 80), value="menu")
-        self.btn_next = Button(W - 2*bw - 20, y, bw, bh, "Proxima", (20, 80, 20), value="next")
-        self.buttons = [self.btn_menu, self.btn_next]
+        # botoes: Proxima, Voltar, Sair
+        self.buttons = make_mode_buttons(W, H, include_next=True)
+        # expõe referências usadas em outras partes do codigo
+        # Proxima == buttons[0]
+        self.btn_next = self.buttons[0]
+        # Voltar == buttons[1], Sair == buttons[2]
         self.smooth_tip = None
 
     def _new_question(self):
         self.current = random.choice(NAMED_COLORS)
-        self.answer_cooldown = time.time() + 1.5
+        self.answer_cooldown = time.time() + 2.5
 
     def process(self, frame, lm_list, hd_list):
         h, w = frame.shape[:2]
@@ -575,7 +635,7 @@ class EduColorsMode:
 
         if lm_list:
             lm = lm_list[0]
-            label = hd_list[0][0].category_name if hd_list else "Right"
+            label = get_hand_label(hd_list)
             states = get_finger_states(lm, label)
             states_hud = states
 
@@ -605,7 +665,7 @@ class EduColorsMode:
         else:
             self.smooth_tip = None
 
-        if self.result_msg and (time.time() - self.result_time) < 2.2:
+        if self.result_msg and (time.time() - self.result_time) < 2.6:
             col = (0, 255, 80) if self.result_ok else (0, 50, 255)
             cv2.putText(frame, self.result_msg, (w//2 - 185, 98),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.9, col, 2, cv2.LINE_AA)
@@ -646,17 +706,16 @@ class EduCountMode:
         self.result_time = 0.0
         self.answer_cooldown = 0.0
         self._new_question()
-        bw, bh = 138, 44
-        y = H - bh - 10
-        self.btn_menu = Button(W - bw - 10, y, bw, bh, "Menu", (20, 20, 80), value="menu")
-        self.buttons = [self.btn_menu]
+        # botoes: Voltar, Sair
+        self.buttons = make_mode_buttons(W, H, include_next=False)
+        # Voltar == buttons[-2]
         self.smooth_tip = None
         self.hold_start = None
         self.last_n = -1
 
     def _new_question(self):
         self.target = random.randint(0, 5)
-        self.answer_cooldown = time.time() + 1.5
+        self.answer_cooldown = time.time() + 2.5
         self.hold_start = None
         self.last_n = -1
 
@@ -693,7 +752,7 @@ class EduCountMode:
 
         if lm_list:
             lm = lm_list[0]
-            label = hd_list[0][0].category_name if hd_list else "Right"
+            label = get_hand_label(hd_list)
             states = get_finger_states(lm, label)
             states_hud = states
             n = count_extended(states)
@@ -741,7 +800,7 @@ class EduCountMode:
             self.hold_start = None
             self.last_n = -1
 
-        if self.result_msg and (time.time() - self.result_time) < 2.2:
+        if self.result_msg and (time.time() - self.result_time) < 2.6:
             col = (0, 255, 80) if self.result_ok else (0, 50, 255)
             cv2.putText(frame, self.result_msg, (w//2 - 205, 98),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.9, col, 2, cv2.LINE_AA)
@@ -784,11 +843,15 @@ class PhysioMode:
         self.cooldown = 0.0
         self.session_start = time.time()
         self.rep_history = []
+        # botoes: Proximo, Voltar, Sair, Salvar Sessao
+        self.buttons = make_mode_buttons(W, H, include_next=True)
+        # adiciona botao de salvar sessao (valor: save_physio)
         bw, bh = 138, 44
-        y = H - bh - 10
-        self.btn_menu = Button(W - bw - 10, y, bw, bh, "Menu",   (20, 20, 80),  value="menu")
-        self.btn_next = Button(W - 2*bw - 20, y, bw, bh, "Proximo", (60, 60, 15), value="next")
-        self.buttons = [self.btn_menu, self.btn_next]
+        y = H - bh - 70
+        self.btn_save = Button(10, y, bw, bh, "Salvar Sessao", (20, 80, 20), value="save_physio")
+        self.buttons.insert(0, self.btn_save)
+        # Proximo == buttons[1] now
+        self.btn_next = [b for b in self.buttons if b.value == "next"][0]
         self.smooth_tip = None
 
     @property
@@ -852,7 +915,7 @@ class PhysioMode:
 
         if lm_list and time.time() > self.cooldown:
             lm = lm_list[0]
-            label = hd_list[0][0].category_name if hd_list else "Right"
+            label = get_hand_label(hd_list)
             states = get_finger_states(lm, label)
             states_hud = states
             n = count_extended(states)
@@ -906,6 +969,12 @@ class PhysioMode:
 
         if action == "next":
             self._next_exercise()
+            action = None
+        elif action == "save_physio":
+            fname = self.save_session()
+            self.result_msg = f"Sessao salva: {fname}"
+            self.result_time = time.time()
+            _beep_ok()
             action = None
 
         if states_hud is not None:
@@ -978,6 +1047,20 @@ class PhysioMode:
                 "3. Repita com anelar e mindinho em sequencia",
             ]
         return []
+
+    def save_session(self):
+        """Salva um resumo da sessao fisioterapia em CSV e retorna o nome do arquivo."""
+        now = int(time.time())
+        fname = f"physio_session_{now}.csv"
+        try:
+            with open(fname, "w", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
+                writer.writerow(["timestamp", "exercise_idx", "exercise", "reps", "rep_times"])
+                for i, t in enumerate(self.rep_history):
+                    writer.writerow([now, self.exercise_idx, self.current_exercise.value, self.reps, ";".join(str(x) for x in self.rep_history)])
+        except Exception:
+            return "erro_salvar"
+        return fname
 
 
 # ─── APP PRINCIPAL ────────────────────────────────────────────

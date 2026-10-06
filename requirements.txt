@@ -1,0 +1,23 @@
+# Runtime dependencies for the SPECTRA patient app (Windows) and therapist panel.
+# Python 3.10-3.12: MediaPipe has no Windows wheels for 3.13 yet.
+#
+# Versions are pinned for reproducibility. MediaPipe and OpenCV are the only entries not
+# verified on the Linux/WSL development box, because the test suite is headless; they are
+# pinned to the latest release known to ship Windows wheels for CPython 3.12.
+
+# Vision and detection
+mediapipe==0.10.21
+opencv-python==4.10.0.84
+numpy>=1.26,<3
+
+# Reports
+reportlab==5.0.1
+matplotlib==3.11.2
+
+# Security (LGPD: encryption at rest and OS key storage)
+cryptography==50.0.2
+keyring==25.7.0
+
+# Therapist panel
+streamlit==1.65.0
+pandas==3.0.6

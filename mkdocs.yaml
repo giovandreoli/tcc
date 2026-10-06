@@ -1,0 +1,30 @@
+site_name: SPECTRA
+site_description: Plataforma de reabilitação de mão, dedos e punho controlada por gestos
+docs_dir: docs
+use_directory_urls: false
+
+theme:
+  name: material
+  language: pt-BR
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: indigo
+  features:
+    - navigation.sections
+    - content.code.copy
+
+nav:
+  - Visão geral: ../README.md
+  - Arquitetura: architecture.md
+  - Gestos: gestures.md
+  - Métricas: metrics.md
+  - LGPD e ética: lgpd.md
+  - Decisões: decisions.md
+
+markdown_extensions:
+  - admonition
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.superfences

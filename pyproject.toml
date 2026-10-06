@@ -1,0 +1,57 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "spectra"
+version = "0.1.0"
+description = "Gesture-controlled hand, finger and wrist rehabilitation platform (webcam based)"
+readme = "README.md"
+requires-python = ">=3.10,<3.13"
+license = { text = "MIT" }
+authors = [{ name = "Daniel" }]
+
+[project.scripts]
+spectra = "spectra.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["spectra*"]
+
+[tool.setuptools.package-data]
+spectra = ["locales/*.json"]
+
+[tool.black]
+line-length = 100
+target-version = ["py310", "py311", "py312"]
+
+[tool.isort]
+profile = "black"
+line_length = 100
+known_first_party = ["spectra"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+exclude = [".venv", "build", "dist"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "C4", "SIM", "RUF"]
+ignore = [
+    "B008",   # function call in default argument (used for frozen defaults)
+    "RUF001", # ambiguous unicode in strings (pt-BR text)
+    "RUF002",
+    "RUF003",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E501"]
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+markers = [
+    "slow: tests that take noticeable time",
+    "requires_camera: tests that need a real webcam (skipped headless)",
+]
+filterwarnings = ["ignore::DeprecationWarning"]

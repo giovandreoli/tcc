@@ -1,0 +1,408 @@
+{
+  "app": {
+    "title": "SPECTRA",
+    "subtitle": "Reabilitação de mão, dedos e punho por gestos",
+    "started": "SPECTRA iniciado.",
+    "hint": "Aponte o indicador e mantenha sobre os botões para navegar.",
+    "stopped": "SPECTRA encerrado.",
+    "interact_hint": "Use o gesto para interagir",
+    "camera_error": "Não foi possível abrir a webcam.",
+    "frame_error": "Não foi possível ler o primeiro frame da webcam.",
+    "unknown_session": "Sessão não encontrada. Peça ao fisioterapeuta para criá-la novamente.",
+    "session_saved": "Sessão salva com as métricas calculadas."
+  },
+  "common": {
+    "back": "Voltar",
+    "quit": "Sair",
+    "next": "Próximo",
+    "none": "Nenhum",
+    "score": "Placar: {score}/{total}",
+    "streak": "Seq: {streak}  (recorde: {record})",
+    "fps": "FPS:{fps}",
+    "estimate": "estimativa"
+  },
+  "mode": {
+    "menu": "Menu Principal",
+    "free_draw": "Pintura Livre",
+    "guided_draw": "Desenho Guiado",
+    "edu_colors": "Educação: Cores",
+    "edu_count": "Educação: Contagem",
+    "physio": "Fisioterapia"
+  },
+  "menu": {
+    "prompt": "Escolha o modo desejado com o indicador"
+  },
+  "gesture": {
+    "state": {
+      "idle": "Aguardando",
+      "pointing": "Apontando",
+      "painting": "Pintando",
+      "erasing": "Apagando",
+      "color_menu": "Menu de cores",
+      "paused": "Pausado"
+    },
+    "action": {
+      "point": "Apontar",
+      "paint": "Pintar",
+      "erase": "Apagar",
+      "color_menu": "Abrir menu de cores",
+      "pause": "Pausar"
+    },
+    "profile": {
+      "standard": "Padrão",
+      "simplified": "Simplificado",
+      "custom": "Personalizado"
+    },
+    "issue": {
+      "missing_action": "A ação \"{actions}\" não tem nenhum gesto associado.",
+      "duplicate_trigger": "As ações \"{actions}\" usam o mesmo gesto ({detail}).",
+      "ambiguous_patterns": "As ações \"{actions}\" diferem por um único dedo ({detail}); podem ser confundidas.",
+      "ring_without_middle": "A ação \"{actions}\" exige o anelar sem o médio ({detail}); é anatomicamente difícil para muitos pacientes.",
+      "ring_and_pinky": "A ação \"{actions}\" usa anelar + mínimo ({detail}); combinação de baixa confiabilidade.",
+      "thumb_dependent": "A ação \"{actions}\" depende do polegar ({detail}); o polegar é o dedo menos confiável em webcam 2D."
+    },
+    "calibration": {
+      "open_prompt": "Abra a mão completamente e mantenha",
+      "closed_prompt": "Feche a mão em punho e mantenha",
+      "done": "Calibração concluída",
+      "fallback": "Dedos sem calibração confiável: {fingers}"
+    }
+  },
+  "metrics": {
+    "quality": {
+      "no_frames": "Nenhum quadro foi registrado nesta sessão.",
+      "low_presence": "A mão foi detectada em menos de 60% dos quadros; as medidas desta sessão são pouco confiáveis.",
+      "low_confidence": "A confiança média da detecção ficou abaixo de 0,50; as medidas desta sessão são pouco confiáveis."
+    },
+    "estimate_note": "Valor estimado a partir de imagem 2D; não substitui goniometria.",
+    "not_measurable": "Não mensurável nesta sessão"
+  },
+  "keypad": {
+    "prompt": "Digite seu PIN de 4 dígitos apontando para os números",
+    "clear": "Limpar",
+    "backspace": "Apagar",
+    "accepted": "PIN correto. Bom treino!",
+    "rejected": "PIN incorreto. Tente novamente."
+  },
+  "audit": {
+    "action": {
+      "login_success": "Login",
+      "login_failure": "Falha de login",
+      "account_locked": "Conta bloqueada",
+      "patient_created": "Paciente cadastrado",
+      "patient_updated": "Paciente atualizado",
+      "patient_viewed": "Paciente consultado",
+      "patient_exported": "Dados exportados",
+      "patient_anonymized": "Paciente anonimizado",
+      "patient_deleted": "Paciente excluído",
+      "consent_recorded": "TCLE registrado",
+      "consent_revoked": "TCLE revogado",
+      "session_started": "Sessão iniciada",
+      "session_finished": "Sessão encerrada",
+      "report_generated": "Relatório gerado",
+      "report_exported": "Relatório exportado",
+      "backup_created": "Backup criado"
+    }
+  },
+  "panel": {
+    "navigation": "Navegação",
+    "logout": "Sair",
+    "demo_mode": "Modo demonstração",
+    "demo_mode_help": "Mascara o nome do paciente na tela e nos relatórios, para apresentações.",
+    "data_dir": "Dados em: {path}",
+    "section": {
+      "patients": "Pacientes",
+      "consent": "Consentimento (TCLE)",
+      "session": "Nova sessão",
+      "history": "Histórico e evolução",
+      "privacy": "Privacidade e dados"
+    },
+    "login": {
+      "subtitle": "Painel do fisioterapeuta",
+      "first_run": "Nenhum paciente cadastrado ainda. Crie sua conta abaixo para começar.",
+      "email": "E-mail",
+      "password": "Senha",
+      "name": "Nome",
+      "submit": "Entrar",
+      "failed": "E-mail ou senha incorretos. Tentativas restantes: {remaining}.",
+      "locked": "Conta bloqueada por excesso de tentativas. Aguarde alguns minutos.",
+      "create_account": "Criar conta de fisioterapeuta",
+      "create": "Criar conta",
+      "created": "Conta criada. Faça login acima."
+    },
+    "field": {
+      "phone": "Telefone",
+      "address": "Endereço",
+      "injury_date": "Data da lesão/cirurgia",
+      "referring": "Profissional que encaminhou",
+      "contraindications": "Contraindicações",
+      "notes": "Anotações clínicas",
+      "pin": "PIN de 4 dígitos",
+      "consent": "TCLE",
+      "difficulty": "Dificuldade",
+      "duration": "Duração máxima (min)",
+      "exercises": "Exercícios",
+      "quality": "Qualidade",
+      "action": "Ação",
+      "subject": "Registro"
+    },
+    "patients": {
+      "empty": "Nenhum paciente cadastrado.",
+      "new": "Cadastrar paciente",
+      "save": "Salvar paciente",
+      "saved": "Paciente cadastrado."
+    },
+    "consent": {
+      "active": "TCLE ativo (versão {version}).",
+      "missing": "Este paciente ainda não tem TCLE registrado. Nenhuma sessão pode ser iniciada.",
+      "read": "Ler o termo completo",
+      "hash": "Identificador do documento: {hash}…",
+      "agree": "O participante leu e concorda com o termo acima.",
+      "signed_by": "Assinado por",
+      "record": "Registrar consentimento",
+      "recorded": "Consentimento registrado.",
+      "revoke": "Revogar consentimento"
+    },
+    "session": {
+      "start": "Iniciar sessão",
+      "started": "Sessão criada. No computador do paciente, execute: {command}",
+      "consent_required": "Não é possível iniciar: o paciente não tem TCLE ativo.",
+      "profile_warnings": "O perfil de gestos escolhido tem avisos:",
+      "calibrated": "Calibração do paciente aplicada ({samples} amostras).",
+      "not_calibrated": "Sem calibração individual; serão usados os limiares padrão."
+    },
+    "history": {
+      "empty": "Nenhuma sessão registrada.",
+      "session": "Sessão",
+      "generate": "Gerar relatório",
+      "download_pdf": "Baixar PDF",
+      "download_txt": "Baixar TXT",
+      "export_share": "Exportar para a pasta compartilhada",
+      "exported": "Relatórios exportados."
+    },
+    "privacy": {
+      "export": "Exportar dados (JSON)",
+      "exported": "Exportado: {path}",
+      "anonymize": "Anonimizar",
+      "anonymized": "Paciente anonimizado; as medidas foram preservadas.",
+      "delete": "Excluir definitivamente",
+      "confirm_delete": "Clique novamente para confirmar a exclusão definitiva.",
+      "backup": "Cópia de segurança",
+      "backup_hint": "Gera um arquivo criptografado com o banco e os relatórios. A pasta compartilhada deve ter acesso restrito.",
+      "backup_password": "Senha do backup",
+      "backup_run": "Gerar backup",
+      "backup_done": "Backup criado: {path}",
+      "audit": "Log de auditoria"
+    },
+    "error": {
+      "name_required": "O nome é obrigatório.",
+      "cpf_invalid": "CPF inválido.",
+      "cpf_duplicate": "Já existe um paciente com este CPF.",
+      "pin_invalid": "O PIN deve ter exatamente 4 dígitos.",
+      "birth_date_future": "A data de nascimento não pode estar no futuro.",
+      "injury_date_future": "A data da lesão não pode estar no futuro.",
+      "password_short": "A senha deve ter pelo menos 8 caracteres."
+    }
+  },
+  "patient": {
+    "sex": {
+      "female": "Feminino",
+      "male": "Masculino",
+      "other": "Outro",
+      "undisclosed": "Não informado"
+    }
+  },
+  "report": {
+    "title": "SPECTRA — Relatório de Sessão",
+    "no_notes": "Sem anotações do fisioterapeuta.",
+    "demo_mode_notice": "Modo demonstração ativo: a identificação do paciente está mascarada.",
+    "disclaimer": "SPECTRA é um protótipo de pesquisa (Trabalho de Conclusão de Curso) e não é um dispositivo médico certificado. As medidas angulares derivam de uma webcam 2D, são aproximações e não substituem goniometria. Este relatório é um apoio à avaliação clínica e não deve ser usado como base única para decisão terapêutica.",
+    "section": {
+      "identification": "Identificação",
+      "session": "Sessão",
+      "exercises": "Exercícios realizados",
+      "metrics": "Métricas",
+      "comparison": "Comparação com a sessão anterior",
+      "trend": "Evolução entre sessões",
+      "charts": "Gráficos",
+      "notes": "Anotações do fisioterapeuta",
+      "warning": "Atenção: qualidade de rastreamento"
+    },
+    "field": {
+      "patient": "Paciente",
+      "cpf": "CPF",
+      "age": "Idade",
+      "sex": "Sexo",
+      "dominant_hand": "Mão dominante",
+      "affected_hand": "Mão tratada",
+      "diagnosis": "Diagnóstico (CID)",
+      "date": "Data",
+      "duration": "Duração",
+      "hand": "Mão",
+      "gesture_profile": "Perfil de gestos",
+      "session_number": "Sessão nº",
+      "pain_before": "Dor antes (EVA)",
+      "pain_after": "Dor depois (EVA)",
+      "exercise": "Exercício",
+      "reps": "Repetições",
+      "pace": "Ritmo (rep/min)",
+      "metric": "Métrica",
+      "value": "Valor",
+      "note": "Observação",
+      "current": "Atual",
+      "previous": "Anterior",
+      "delta": "Variação"
+    },
+    "metric": {
+      "rom_finger": "Amplitude de movimento — {finger}",
+      "wrist_rotation": "Rotação do punho (estimativa)",
+      "tremor_band": "Energia espectral 4–12 Hz",
+      "jerk": "Suavidade (jerk médio)",
+      "amplitude_decline": "Queda de amplitude",
+      "pace_decline": "Queda de ritmo",
+      "score": "Melhor pontuação (desenho guiado)",
+      "mean_deviation": "Desvio médio do traçado",
+      "completion": "Percurso concluído"
+    },
+    "compare": {
+      "mean_rom": "Amplitude média",
+      "score": "Pontuação",
+      "amplitude_decline": "Queda de amplitude (%)"
+    },
+    "trend": {
+      "up": "↑ aumento",
+      "down": "↓ redução",
+      "stable": "= estável",
+      "new": "primeira sessão"
+    },
+    "chart": {
+      "rom_title": "Amplitude de movimento por dedo",
+      "exercises_title": "Repetições por exercício",
+      "degrees": "graus",
+      "target": "Meta"
+    }
+  },
+  "safety": {
+    "rest": "Hora de descansar: relaxe a mão por alguns instantes.",
+    "time_limit": "Limite de tempo da sessão atingido.",
+    "paused": "Sessão pausada. Repita o gesto de pausa para retomar."
+  },
+  "finger": {
+    "thumb": "Polegar",
+    "index": "Indicador",
+    "middle": "Médio",
+    "ring": "Anelar",
+    "pinky": "Mínimo",
+    "short": {
+      "thumb": "P",
+      "index": "I",
+      "middle": "M",
+      "ring": "A",
+      "pinky": "Mi"
+    }
+  },
+  "color": {
+    "red": "Vermelho",
+    "green": "Verde",
+    "blue": "Azul",
+    "yellow": "Amarelo",
+    "orange": "Laranja",
+    "purple": "Roxo",
+    "pink": "Rosa",
+    "cyan": "Ciano",
+    "brown": "Marrom",
+    "white": "Branco/Apaga",
+    "eraser": "Borracha"
+  },
+  "paint": {
+    "title": "PINTURA LIVRE",
+    "clear": "Limpar",
+    "save": "Salvar",
+    "undo": "Desfazer",
+    "command_clear": "LIMPAR",
+    "command_undo": "DESFAZER",
+    "clearing": "Limpando...",
+    "undoing": "Desfazendo...",
+    "canvas_cleared": "Canvas limpo!",
+    "saved": "Salvo: {filename}",
+    "save_failed": "Falha ao salvar",
+    "undone": "Desfeito!",
+    "nothing_to_undo": "Nada para desfazer",
+    "gesture": "Gesto: {gesture}",
+    "brush": "Pincel:{size}px",
+    "pick_color": "Escolha a cor: aponte e mantenha",
+    "legend_1": "1 dedo=apontar  2=pintar  3=apagar",
+    "legend_2": "mao aberta=cores  punho=pausar"
+  },
+  "guided": {
+    "title": "DESENHO GUIADO",
+    "prompt": "Siga a linha com o indicador",
+    "start_hint": "Aponte para o início da figura para começar",
+    "shape": {
+      "line": "Linha",
+      "circle": "Círculo",
+      "zigzag": "Zigue-zague",
+      "spiral": "Espiral"
+    },
+    "difficulty": {
+      "easy": "Fácil",
+      "medium": "Médio",
+      "hard": "Difícil"
+    },
+    "difficulty_label": "Dificuldade: {level}",
+    "shape_label": "Figura: {shape}",
+    "completion": "Percurso: {percent}%",
+    "deviation": "Desvio médio: {value}",
+    "score": "Pontuação: {score}",
+    "time": "Tempo: {seconds}s",
+    "finish": "Concluir",
+    "restart": "Refazer",
+    "result": "Pontuação {score} — percurso {percent}%",
+    "attempt": "Tentativa {number}"
+  },
+  "edu_colors": {
+    "prompt": "Gesticule a combinação de dedos para esta cor:",
+    "hint": "Dica: {hint}",
+    "correct": "CORRETO! +1  (seq:{streak})",
+    "wrong": "Errado! Era: {hint}"
+  },
+  "edu_count": {
+    "prompt": "Levante esse número de dedos!",
+    "hold_hint": "(mantenha por {secs}s para confirmar)",
+    "your_fingers": "Seus dedos: {count}",
+    "correct": "CERTO! {count} dedo(s)! seq:{streak}",
+    "wrong": "Errado! Era {target}"
+  },
+  "physio": {
+    "title": "FISIOTERAPIA",
+    "exercise_index": "Ex {current}/{total}",
+    "reps": "{done}/{target} reps",
+    "rep_done": "Rep {count}!",
+    "pace": "Ritmo: {rpm} rep/min",
+    "session_timer": "Sessão: {mm}:{ss}",
+    "phase": "Fase: {phase}",
+    "phase_open": "ABRIR",
+    "phase_close": "FECHAR",
+    "completed": "EXERCÍCIO CONCLUÍDO!",
+    "advance": "Avance para o próximo exercício!",
+    "save_session": "Salvar Sessão",
+    "session_saved": "Sessão salva: {filename}",
+    "session_save_failed": "Falha ao salvar a sessão",
+    "exercise": {
+      "open_close": "Abrir e Fechar a Mão",
+      "finger_touch": "Oposição do Polegar (Pinça)",
+      "finger_wave": "Onda de Dedos"
+    },
+    "instructions": {
+      "open_close_1": "1. Abra a mão completamente (4+ dedos levantados)",
+      "open_close_2": "2. Feche em punho (0 dedos levantados)",
+      "open_close_3": "3. Repita suavemente, sem forçar",
+      "finger_touch_1": "1. Toque o polegar na ponta do indicador",
+      "finger_touch_2": "2. Forme uma pinça e solte",
+      "finger_touch_3": "3. Movimento lento e controlado",
+      "finger_wave_1": "1. Levante o indicador e abaixe",
+      "finger_wave_2": "2. Levante o médio e abaixe",
+      "finger_wave_3": "3. Repita com anelar e mínimo em sequência"
+    }
+  }
+}

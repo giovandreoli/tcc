@@ -1,0 +1,55 @@
+# Byte-compiled / optimized
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Packaging / build
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Testing / coverage
+.pytest_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.ruff_cache/
+.mypy_cache/
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# MediaPipe model: the root copy is tracked so the app runs offline; downloaded
+# copies inside the data directory are not.
+*.task
+!/hand_landmarker.task
+
+# Patient data, database and generated artifacts (LGPD: never commit)
+data/
+Spectra/
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+*.db-wal
+*.db-shm
+reports/
+exports/
+backups/
+pintura_*.png
+physio_session_*.csv
+*.pdf
+secrets/
+*.key
+.env
+.env.*

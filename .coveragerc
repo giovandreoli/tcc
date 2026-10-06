@@ -1,0 +1,20 @@
+[run]
+branch = True
+source = spectra
+omit =
+    spectra/__main__.py
+    spectra/therapist_panel/*
+    spectra/detection/hand_detector.py
+
+[report]
+show_missing = True
+skip_empty = True
+precision = 1
+exclude_lines =
+    pragma: no cover
+    if TYPE_CHECKING:
+    raise NotImplementedError
+    if __name__ == .__main__.:
+
+[html]
+directory = htmlcov

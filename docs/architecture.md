@@ -4,6 +4,20 @@ Why SPECTRA is split the way it is, and what each boundary buys.
 
 ## 1. The constraint that shapes everything
 
+**Local browser extension:** the therapist panel now also serves a patient page selected by
+`?paciente=1` or a `?sala=<code>` link. `browser/rooms.py` admits an expiring code plus PIN,
+checks consent and enforces an exclusive renewable claim in SQLite. `browser/page.py` captures
+browser video through WebRTC with no external ICE servers and no audio. `browser/session.py`
+serializes frame processing and finalization, reusing `SpectraApp`, `HandDetector`, the selected
+physiotherapy exercises and the existing report metrics without opening an OpenCV window.
+The duration and exercise selection are stored with the room.
+
+This extension is deliberately **same-computer only**, with a localhost-bound launcher.
+Frames leave the browser for the local Python process, never for a remote service, and are
+not persisted. This is not yet the target remote architecture: browser-side inference,
+HTTPS, remote access, therapist video, signaling and TURN are deferred.
+The existing desktop shell remains available.
+
 The application runs on **Windows with a webcam**, but it is developed and tested on
 **Linux/WSL with neither**. Every design decision below follows from that: the parts that
 touch hardware are small, isolated and thin, and the parts that hold the logic worth testing

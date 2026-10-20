@@ -2,10 +2,15 @@
 REM Therapist panel. Run from the repository root.
 setlocal
 cd /d "%~dp0\.."
+set "SPECTRA_PYTHON="
 
-if exist ".venv\Scripts\activate.bat" (
-    call ".venv\Scripts\activate.bat"
-) else (
+for %%E in (.venv-py312 .venv .venv312) do (
+    if not defined SPECTRA_PYTHON if exist "%%E\Scripts\python.exe" (
+        set "SPECTRA_PYTHON=%%E\Scripts\python.exe"
+    )
+)
+
+if not defined SPECTRA_PYTHON (
     echo [SPECTRA] Virtual environment not found. Create it with:
     echo     py -3.12 -m venv .venv
     echo     .venv\Scripts\activate
@@ -15,6 +20,6 @@ if exist ".venv\Scripts\activate.bat" (
 )
 
 echo [SPECTRA] Starting the therapist panel...
-python -m streamlit run spectra\therapist_panel\app.py
+"%SPECTRA_PYTHON%" -m streamlit run spectra\therapist_panel\app.py --server.address localhost --browser.gatherUsageStats false
 if errorlevel 1 pause
 endlocal

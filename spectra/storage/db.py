@@ -165,6 +165,17 @@ CREATE INDEX IF NOT EXISTS idx_metric_session ON metric_summary(session_id);
 CREATE INDEX IF NOT EXISTS idx_sample_session ON sample(session_id, at);
 CREATE INDEX IF NOT EXISTS idx_audit_subject ON audit_log(subject_id, at);
 CREATE INDEX IF NOT EXISTS idx_consent_patient ON consent(patient_id, accepted_at);
+
+CREATE TABLE IF NOT EXISTS browser_room (
+    code_hash TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL UNIQUE REFERENCES session(id) ON DELETE CASCADE,
+    expires_at REAL NOT NULL,
+    duration_minutes INTEGER NOT NULL,
+    exercises TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'waiting',
+    claim_hash TEXT,
+    heartbeat_at REAL
+);
 """
 
 

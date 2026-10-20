@@ -97,6 +97,11 @@ py -3.12 -m venv .venv
 pip install -r requirements.txt
 ```
 
+Instale as dependências em conjunto pelo arquivo de requisitos. O MediaPipe 0.10.21
+exige `protobuf>=4.25.3,<5`; por isso o painel usa Streamlit 1.50.0 e pandas 2.3.3.
+Atualizar o Streamlit isoladamente pode tornar o ambiente incompatível.
+Confira a instalação com `python -m pip check`.
+
 O modelo `hand_landmarker.task` já acompanha o repositório; se faltar, é baixado
 automaticamente na primeira execução.
 
@@ -125,9 +130,43 @@ Em **Consentimento (TCLE)**, leia o termo com o participante e registre o aceite
 ### 4. Configurar e iniciar a sessão
 
 Em **Nova sessão**, escolha a mão tratada, o perfil de gestos, a dificuldade, a duração e os
-exercícios. O painel mostra o identificador da sessão e o comando a executar.
+exercícios. A opção padrão é **No navegador (local, sem comandos)**.
 
-### 5. Aplicativo do paciente
+### 5. Sessão do paciente no navegador
+
+1. Clique em **Iniciar sessão** no painel para gerar o código da sala.
+2. Clique em **Abrir sessão do paciente**: uma nova aba recebe o código automaticamente.
+3. O paciente confirma o PIN e clica em **Entrar na sessão**.
+4. Clique em **Iniciar câmera** e autorize o acesso à webcam no Chrome ou Edge.
+5. Os exercícios aparecem na própria imagem. Aponte e mantenha sobre os botões para avançar.
+6. Clique em **Finalizar e salvar sessão**, ou pare a câmera, para salvar as métricas no histórico.
+
+O paciente não precisa executar comandos nem instalar outro aplicativo. Para iniciar o painel,
+o profissional pode dar dois cliques em `scripts\painel.bat`. O atalho procura primeiro o
+ambiente `.venv-py312`, depois `.venv` e `.venv312`; as dependências devem estar instaladas nele.
+Após atualizar o código, reinicie o painel para carregar a nova dependência `streamlit-webrtc`.
+
+**Esta é a primeira etapa, local:** painel e navegador do paciente devem estar no **mesmo
+computador**, acessando `http://localhost:8501`. A sala não é acessível da casa do paciente.
+Não há videochamada nem áudio nesta etapa. Não publique este painel na internet.
+O vídeo vai do navegador ao processo local do SPECTRA, é processado em memória e não é gravado;
+o reconhecimento ainda não roda no navegador. Não há servidores STUN/TURN externos configurados.
+
+O código de 12 caracteres expira em uma hora para entrada e exige o PIN cadastrado.
+Uma sala admite um navegador por vez. Uma conexão interrompida pode ser substituída após
+90 segundos sem atividade; uma sala concluída não pode ser reutilizada. Fechar a aba
+normalmente encerra o vídeo e salva, mas uma queda do processo pode perder as métricas ainda
+em memória: prefira sempre finalizar pelo botão e conferir o histórico.
+Nesta etapa estão disponíveis abrir/fechar a mão, pinça e onda de dedos, respeitando a seleção
+e a duração configuradas no painel. O início da sessão ocorre com a primeira imagem recebida.
+
+**Próxima etapa, ainda não implementada:** hospedagem HTTPS, processamento de gestos no
+navegador, acesso remoto por link/código, acompanhamento e chamada de vídeo com sinalização
+e TURN, além da revisão de autenticação, consentimento e infraestrutura para uso pela internet.
+
+#### Aplicativo Windows anterior (opcional)
+
+Selecione **Aplicativo Windows (modo anterior)** no painel para obter o identificador e o comando:
 
 ```powershell
 scripts\spectra.bat --session <id-da-sessao>

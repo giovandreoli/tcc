@@ -401,3 +401,28 @@ All three are thin wrappers over a third-party API; testing them would test the 
 excluded in `.coveragerc` so the figure reflects what is actually verified: **92.6% overall**,
 with the pure-logic packages (`gestures`, `metrics`, `storage`, `guided`, `reports`) between
 94% and 100%.
+
+## Local browser sessions
+
+**D-084 — Deliver the local browser workflow before internet deployment and video calls.**
+The user explicitly chose to validate locally first. Room links must not imply that a
+localhost server is accessible from a patient's home.
+
+**D-085 — Reuse the exercise engine with `streamlit-webrtc==0.63.11`.**
+This release supports the installed Streamlit 1.50 and avoids a second exercise implementation.
+Video is processed in memory by the same local Python process, not by browser-side inference.
+No audio or external ICE servers are enabled; remote inference and calls remain future work.
+
+**D-086 — Store expiring room-code digests and exclusive claims in SQLite.**
+A random 12-character code plus the patient PIN admits one browser. Codes expire after one
+hour for entry; a 90-second heartbeat lease permits takeover after interruption. Completed
+rooms cannot be reused, and patient deletion cascades to the room.
+
+**D-087 — Persist local browser exercise selection and duration with the room.**
+Only the three existing physiotherapy exercises are offered in this flow. The first received
+frame starts the session clock; finalization closes the current exercise window and uses the
+existing metrics and report pipeline.
+
+**D-088 — Launch the panel by double-click, preferring the verified Python 3.12 environment.**
+The launcher checks `.venv-py312` before legacy environment folders, binds to localhost and
+disables usage statistics. Patients enter through a button or code, never a shell command.

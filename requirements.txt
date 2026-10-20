@@ -19,5 +19,9 @@ cryptography==50.0.2
 keyring==25.7.0
 
 # Therapist panel
-streamlit==1.65.0
-pandas==3.0.6
+# Keep protobuf 4.x compatibility with MediaPipe; Streamlit 1.50 requires pandas <3.
+streamlit==1.50.0
+pandas==2.3.3
+# Newer PyArrow wheels require NumPy 2, incompatible with MediaPipe 0.10.21.
+pyarrow==19.0.1
+streamlit-webrtc==0.63.11

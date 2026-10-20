@@ -10,6 +10,17 @@ checks consent and enforces an exclusive renewable claim in SQLite. `browser/pag
 browser video through WebRTC with no external ICE servers and no audio. `browser/session.py`
 serializes frame processing and finalization, reusing `SpectraApp`, `HandDetector`, the selected
 physiotherapy exercises and the existing report metrics without opening an OpenCV window.
+The packaged `browser/camera` component attaches the camera track directly to a local video
+element and negotiates through `browser/video.py`. The adapter targets the pinned
+streamlit-webrtc 0.63.11 `WebRtcWorker` API; verify signaling and cleanup before upgrading it.
+The stock SENDONLY frontend has no preview, so it cannot provide this user interface.
+WebRTC uses SENDONLY: the visible preview is the browser's local camera track, while frames
+are analyzed asynchronously in Python. No processed video is encoded or sent back. The
+processor returns its input frame unchanged to the bounded receiver (size 1); the asynchronous
+processor consumes the newest queued input instead of accumulating inference work.
+Only the preview has a CSS mirror transform. Detection and recording use original,
+unmirrored camera pixels; hand labels refer to the patient's anatomical hand.
+Rest reminders are exposed in the live status and displayed beside the video.
 The duration and exercise selection are stored with the room.
 `browser/live.py` keeps a weak-reference registry of running browser sessions so the panel's
 Home screen can show live counters (never frames); `Rooms.overview()` derives room statuses.

@@ -135,6 +135,13 @@ def test_coach_reacts_to_live_status(changes, mood):
     assert coach(_status(**changes))[0] == mood
 
 
+def test_coach_names_the_treated_hand_when_it_is_not_visible():
+    from spectra.browser.page import coach
+
+    assert "mão direita" in coach(_status(hand_visible=False), "Right")[1]
+    assert "mão esquerda" in coach(_status(hand_visible=False), "Left")[1]
+
+
 def test_new_interface_keys_exist_in_catalog():
     catalog = load_catalog("pt_BR")
     keys = [

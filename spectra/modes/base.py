@@ -59,6 +59,7 @@ class ModeContext:
     #: Shared across modes so one session produces one continuous recording.
     recorder: SessionRecorder = field(default_factory=SessionRecorder)
     guard: SessionGuard = field(default_factory=SessionGuard)
+    camera_overlay: bool = True
 
 
 @dataclass(frozen=True)

@@ -54,6 +54,8 @@ and consent is checked again on entry and periodically during processing.
 
 The first browser implementation is **local only**. WebRTC transports camera frames from the
 browser to the Python process on the same computer for inference; frames stay in memory.
+The camera preview is local to the browser (SENDONLY); no processed video returns from Python.
+It is mirrored visually only, without changing the image used for anatomical hand selection.
 Audio capture is disabled and no external ICE servers are configured. The Windows panel
 launcher binds to localhost and disables Streamlit usage statistics. Do not expose this
 prototype directly to the internet. Closing the page normally finalizes the session, but

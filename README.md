@@ -141,8 +141,19 @@ exercícios. A opção padrão é **No navegador (local, sem comandos)**.
    (mão visível, boa iluminação, espaço livre, sem dor forte) e vê a prévia dos exercícios.
    Com dor **8 ou mais**, o exercício é bloqueado e o paciente é orientado a falar com o
    fisioterapeuta.
-5. **Exercitar:** clique em **Iniciar câmera** e autorize a webcam no Chrome ou Edge. O
-   Spectro (o fantasminha guia) acompanha com dicas, anel de tempo e repetições.
+5. **Exercitar:** clique em **Iniciar câmera** e autorize a webcam no Chrome ou Edge.
+   A prévia da câmera é exibida diretamente no navegador, sem esperar a análise do Python.
+   Não há menus, textos ou pontos desenhados sobre o vídeo.
+   Ao lado ficam exercício, repetições, tempo restante e as dicas do Spectro.
+   Consulte **Como fazer este exercício** para as instruções e use **Próximo exercício**
+   para avançar, sem precisar apontar para botões dentro da câmera.
+   Para reduzir a latência, o navegador solicita até 960 × 540 a 30 FPS, e o detector
+   rastreia uma mão entre os frames. Mostre somente a mão configurada para a sessão.
+   Os 30 FPS são uma solicitação, não uma garantia: câmera e computador limitam a taxa real.
+   A prévia é espelhada apenas na tela; o detector recebe a imagem original para identificar
+   a mão anatômica correta. **Esquerda/direita se referem à sua mão, não ao lado da tela.**
+   A contagem depende da velocidade da análise, mesmo quando a prévia está fluida.
+   Os lembretes de descanso aparecem ao lado do vídeo.
 6. Clique em **Finalizar e salvar sessão**, ou pare a câmera, para salvar as métricas.
 7. **Concluir:** o paciente vê o resumo e informa a dor após a sessão. Dor 8 ou mais, ou
    aumento de 3 pontos ou mais, exibe um aviso para conversar com o fisioterapeuta.

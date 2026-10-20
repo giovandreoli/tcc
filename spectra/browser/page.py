@@ -7,13 +7,12 @@ post-session pain). Spectro, the mascot, explains each step in plain language.
 
 from __future__ import annotations
 
-import av
 import streamlit as st
-from streamlit_webrtc import VideoProcessorBase, WebRtcMode, webrtc_streamer
 
 from spectra.browser.live import LiveStatus
 from spectra.browser.rooms import RoomError, Rooms
 from spectra.browser.session import BrowserSession
+from spectra.browser.video import camera_streamer, stop_camera
 from spectra.i18n import t
 from spectra.service import SpectraService
 from spectra.webui import art
@@ -24,15 +23,6 @@ STAGE_KEY = "browser_stage"
 PAIN_AFTER_KEY = "browser_pain_after_saved"
 CHECKLIST = ("light", "framing", "distance", "comfort")
 STEPS = ("enter", "prepare", "exercise", "finish")
-
-
-class ExerciseVideoProcessor(VideoProcessorBase):
-    def __init__(self, session: BrowserSession) -> None:
-        self.session = session
-
-    def recv(self, frame: av.VideoFrame) -> av.VideoFrame:
-        image = self.session.process(frame.to_ndarray(format="bgr24"))
-        return av.VideoFrame.from_ndarray(image, format="bgr24")
 
 
 def _pain_label(value: int) -> str:
@@ -49,16 +39,28 @@ def _stepper(stage: str) -> None:
 
 
 def _reset() -> None:
+    session = st.session_state.get(SESSION_KEY)
+    if session is not None:
+        stop_camera(session)
     for key in (SESSION_KEY, STAGE_KEY, PAIN_AFTER_KEY):
         st.session_state.pop(key, None)
 
 
-def coach(status: LiveStatus) -> tuple[str, str]:
+def coach(status: LiveStatus, hand_label: str | None = None) -> tuple[str, str]:
     """Mascot mood and message for the live status."""
     if status.frames == 0:
         return "think", t("browser.waiting_camera")
     if not status.hand_visible:
-        return "think", t("ux.patient.coach.show_hand")
+        key = (
+            "ux.patient.coach.show_left_hand"
+            if hand_label == "Left"
+            else (
+                "ux.patient.coach.show_right_hand"
+                if hand_label == "Right"
+                else "ux.patient.coach.show_hand"
+            )
+        )
+        return "think", t(key)
     if status.target and status.reps >= status.target:
         return "cheer", t("ux.patient.coach.exercise_done")
     if status.target and status.reps >= status.target / 2:
@@ -161,63 +163,52 @@ def _render_live(session: BrowserSession) -> None:
         st.session_state[STAGE_KEY] = "finish"
         st.rerun(scope="app")
         return
-    mood, message = coach(status)
-    ui.guide(mood, message)
-    st.html(
-        art.progress_ring_html(
-            status.time_fraction,
-            _minutes(status.limit_seconds - status.elapsed_seconds),
-            t("ux.live.remaining"),
-        )
-    )
+    if status.safety_key:
+        st.warning(t(status.safety_key))
     exercise_label = t(
         "ux.live.exercise", current=status.exercise_index + 1, total=status.exercise_total
     )
-    ui.stats(
-        [
-            (exercise_label, t(f"physio.exercise.{status.exercise}"), ""),
-            (
-                t("ux.live.reps"),
-                f"{status.reps}/{status.target or '—'}",
-                t("ux.live.total", total=status.total_reps),
-            ),
-        ]
+    st.caption(exercise_label)
+    st.subheader(t(f"physio.exercise.{status.exercise}"))
+    st.html(
+        art.stat_cards_html(
+            [
+                (t("ux.live.reps"), f"{status.reps}/{status.target or '—'}", ""),
+                (
+                    t("ux.live.remaining"),
+                    _minutes(status.limit_seconds - status.elapsed_seconds),
+                    "",
+                ),
+            ]
+        )
+    )
+    st.progress(min(1.0, status.reps / status.target) if status.target else 0.0)
+    mood, message = coach(status, session.admission.session.hand.value)
+    st.html(art.bubble_html(mood, message, size=44))
+    with st.expander(t("ux.live.instructions")):
+        for line in range(1, 4):
+            st.caption(t(f"physio.instructions.{status.exercise}_{line}"))
+    st.button(
+        t("ux.live.next"),
+        disabled=status.frames == 0,
+        use_container_width=True,
+        on_click=session.next_exercise,
     )
 
 
 def _render_exercise(session: BrowserSession) -> None:
     _stepper("exercise")
-    camera, panel = st.columns([3, 2], gap="large")
+    camera, panel = st.columns([2, 1], gap="large")
     with camera:
-        st.caption(t("browser.camera_hint"))
-        webrtc_streamer(
-            key="physio_camera",
-            mode=WebRtcMode.SENDRECV,
-            rtc_configuration={"iceServers": []},
-            server_rtc_configuration={"iceServers": []},
-            media_stream_constraints={
-                "video": {"width": {"ideal": 960}, "height": {"ideal": 720}},
-                "audio": False,
-            },
-            video_processor_factory=lambda: ExerciseVideoProcessor(session),
-            on_video_ended=session.finish,
-            async_processing=False,
-            translations={
-                "start": t("browser.camera_start"),
-                "stop": t("browser.camera_stop"),
-                "select_device": t("browser.select_device"),
-                "media_api_not_available": t("browser.camera_unavailable"),
-                "device_ask_permission": t("browser.camera_permission"),
-                "device_not_available": t("browser.camera_missing"),
-                "device_access_denied": t("browser.camera_denied"),
-            },
-        )
-        st.caption(t("browser.privacy"))
+        st.caption(t("ux.live.camera_hint"))
+        camera_streamer(session)
+        with st.expander(t("ux.live.camera_help")):
+            st.caption(t("browser.camera_hint"))
+            st.caption(t("browser.privacy"))
     with panel:
         _render_live(session)
         st.button(
             t("browser.finish"),
-            type="primary",
             use_container_width=True,
             on_click=_finish,
             args=(session,),
@@ -257,6 +248,7 @@ def _render_pain_after(service: SpectraService, session: BrowserSession) -> None
 
 
 def _render_finish(service: SpectraService, session: BrowserSession) -> None:
+    stop_camera(session)
     _stepper("finish")
     status = session.status()
     if status.error_key:
@@ -293,6 +285,7 @@ def render_patient(service: SpectraService) -> None:
     if stage == "finish" or session.status().finished:
         _render_finish(service, session)
     elif stage == "exercise":
-        _render_exercise(session)
+        with st.container(key="exercise_workspace"):
+            _render_exercise(session)
     else:
         _render_prepare(session)

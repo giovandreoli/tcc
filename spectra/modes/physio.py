@@ -27,6 +27,7 @@ REPS_TARGET = 8
 PACE_WINDOW_SECONDS = 10.0
 PINCH_THRESHOLD_PX = 40.0
 OPEN_HAND_FINGERS = 4
+CLOSED_HAND_MAX_EXTENDED = 1
 
 
 class PhysioExercise(Enum):
@@ -56,7 +57,7 @@ class OpenCloseDetector:
         count = states.extended_count
         if self.phase == "open" and count >= OPEN_HAND_FINGERS:
             self.phase = "close"
-        elif self.phase == "close" and count == 0:
+        elif self.phase == "close" and count <= CLOSED_HAND_MAX_EXTENDED:
             self.phase = "open"
             return True
         return False
@@ -211,7 +212,7 @@ class PhysioMode(BaseMode):
         self._message = text
         self._message_at = time.time()
 
-    def _next_exercise(self) -> None:
+    def next_exercise(self) -> None:
         self.progress.close()
         self.history.append(self.progress)
         self.exercise_index = (self.exercise_index + 1) % len(self.EXERCISES)
@@ -227,9 +228,23 @@ class PhysioMode(BaseMode):
     # -------------------------------------------------------------- process
     def process(self, frame: np.ndarray, detection: DetectionResult) -> tuple[np.ndarray, Any]:
         height, width = frame.shape[:2]
-        dim_frame(frame, (22, 10, 10), 0.65)
-
         exercise = self.current_exercise
+        frame_context = self.observe(frame.shape, detection)
+        pointer = frame_context.pointer
+        landmarks = frame_context.landmarks
+        states = frame_context.states
+        can_update = time.time() > self._cooldown_until
+        if (
+            landmarks is not None
+            and states is not None
+            and can_update
+            and self._update_detector(exercise, landmarks, states, frame.shape)
+        ):
+            self._register_rep()
+        if not self.context.camera_overlay:
+            return frame, None
+
+        dim_frame(frame, (22, 10, 10), 0.65)
         draw_text(frame, t("physio.title"), (10, 32), 0.8, (0, 220, 255), 2)
         draw_text(frame, exercise.title, (10, 62), 0.85, (255, 255, 255), 2)
 
@@ -260,16 +275,9 @@ class PhysioMode(BaseMode):
         for i, line in enumerate(exercise.instructions):
             draw_text(frame, line, (10, 140 + i * 28), 0.58, (200, 200, 200))
 
-        frame_context = self.observe(frame.shape, detection)
-        pointer = frame_context.pointer
-        landmarks = frame_context.landmarks
-        states = frame_context.states
-
-        if landmarks is not None and states is not None and time.time() > self._cooldown_until:
+        if landmarks is not None and states is not None and can_update:
             if pointer is not None:
                 cv2.circle(frame, pointer, 10, (0, 220, 255), -1)
-            if self._update_detector(exercise, landmarks, states, frame.shape):
-                self._register_rep()
             self._draw_finger_indicators(frame, states)
 
         pace = self.progress.pace_rpm()
@@ -294,7 +302,7 @@ class PhysioMode(BaseMode):
 
         action = self.draw_buttons(frame, pointer)
         if action == ACTION_NEXT:
-            self._next_exercise()
+            self.next_exercise()
             action = None
         elif action == ACTION_SAVE_SESSION:
             self._save_session()

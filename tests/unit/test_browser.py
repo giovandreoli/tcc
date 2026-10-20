@@ -157,8 +157,10 @@ class FakeDetector:
     def __init__(self, *args, **kwargs):
         self.closed = False
         self.result = DetectionResult()
+        self.options = kwargs
 
     def detect(self, frame):
+        self.last_frame = frame.copy()
         return self.result
 
     def close(self):
@@ -188,6 +190,89 @@ def test_browser_reuses_exercises_without_camera_or_window(browser, clock):
     mode = browser._app.modes[AppMode.PHYSIO]
     assert [exercise.value for exercise in mode.EXERCISES] == ["open_close"]
     assert browser._app.recorder.frames_total == 1
+    assert browser._detector.options["video_mode"] is True
+    assert browser._detector.options["num_hands"] == 1
+
+
+def test_browser_counts_open_close_with_a_partial_fist(browser, clock):
+    frame = np.zeros((720, 960, 3), dtype=np.uint8)
+    browser.process(frame)
+    detector = browser._detector
+
+    for pattern in ((True,) * 5, (True, False, False, False, False)):
+        detector.result = make_detection(pattern)
+        for _ in range(8):
+            clock.advance(0.1)
+            browser.process(frame)
+
+    assert browser.status().reps == 1
+
+
+def test_browser_keeps_camera_pixels_free_of_desktop_controls(browser):
+    frame = np.full((720, 960, 3), (70, 100, 140), dtype=np.uint8)
+    output = browser.process(frame)
+    np.testing.assert_array_equal(output, frame)
+    assert browser._app.modes[AppMode.PHYSIO].context.camera_overlay is False
+
+
+@pytest.mark.parametrize("label", ["Left", "Right"])
+def test_browser_detects_anatomical_hand_from_unmirrored_camera_pixels(
+    browser, service, clock, label
+):
+    from spectra.storage.models import Hand
+
+    session = replace(browser.admission.session, hand=Hand(label))
+    browser.admission = replace(browser.admission, session=session)
+    # Attach_session loads this value from storage.
+    with service.db.transaction() as connection:
+        connection.execute("UPDATE session SET hand = ? WHERE id = ?", (label, session.id))
+    frame = np.zeros((540, 960, 3), dtype=np.uint8)
+    frame[:, :100] = (20, 80, 160)
+    browser.process(frame)
+    for pattern in ((True,) * 5, (False,) * 5):
+        browser._detector.result = make_detection(pattern, label=label)
+        for _ in range(8):
+            clock.advance(0.1)
+            browser.process(frame)
+    np.testing.assert_array_equal(browser._detector.last_frame, frame)
+    assert browser.status().hand_visible
+    assert browser.status().reps == 1
+
+
+def test_browser_rest_prompt_remains_available_without_video_overlays(browser, clock, monkeypatch):
+    from spectra.core.session_guard import SessionGuard
+
+    frame = np.zeros((540, 960, 3), dtype=np.uint8)
+    browser.process(frame)
+    browser._app.guard = SessionGuard(limit_minutes=5, rest_every_minutes=1)
+    browser._app.guard.start()
+    monkeypatch.setattr("spectra.browser.session.time.monotonic", lambda: clock())
+    clock.advance(61)
+    output = browser.process(frame)
+    np.testing.assert_array_equal(output, frame)
+    assert browser.status().safety_key == "safety.rest"
+    clock.advance(9)
+    assert browser.status().safety_key is None
+
+
+def test_browser_next_button_preserves_recorded_reps(browser, clock):
+    browser.admission = replace(browser.admission, exercises=("open_close", "finger_touch"))
+    frame = np.zeros((720, 960, 3), dtype=np.uint8)
+    browser.process(frame)
+    for pattern in ((True,) * 5, (False,) * 5):
+        browser._detector.result = make_detection(pattern)
+        for _ in range(8):
+            clock.advance(0.1)
+            browser.process(frame)
+    assert browser.status().reps == 1
+    browser.next_exercise()
+    status = browser.status()
+    assert status.exercise == "finger_touch"
+    assert status.exercise_index == 1 and status.reps == 0
+    assert status.total_reps == 1
+    browser.finish()
+    with pytest.raises(RuntimeError, match="inactive"):
+        browser.next_exercise()
 
 
 def test_browser_finishes_once_and_saves_existing_report_metrics(browser, service, clock):
@@ -250,14 +335,35 @@ def test_processing_error_is_exposed_not_hidden(browser, monkeypatch):
     assert browser.snapshot()[2] == "browser.processing_error"
 
 
+def test_video_processor_processes_frames_and_saves_when_track_ends(browser):
+    import av
+
+    from spectra.browser.video import ExerciseVideoProcessor
+
+    processor = ExerciseVideoProcessor(browser)
+    image = np.zeros((720, 960, 3), dtype=np.uint8)
+    frame = av.VideoFrame.from_ndarray(image, format="bgr24")
+    output = processor.recv(frame)
+    assert output is frame
+    assert output.to_ndarray(format="bgr24").shape == image.shape
+    assert browser.status().frames == 1
+    assert browser.status().target == 8
+    processor.on_ended()
+    assert browser.finished and browser.saved
+    processor.on_ended()
+
+
 def test_patient_ui_admits_by_code_and_pin_without_therapist_login(service, plan, monkeypatch):
+    from unittest.mock import Mock
+
     from streamlit.testing.v1 import AppTest
 
     import spectra.browser.page as page_module
     import spectra.therapist_panel.app as panel_module
 
     monkeypatch.setattr(panel_module, "get_service", lambda: service)
-    monkeypatch.setattr(page_module, "webrtc_streamer", lambda **kwargs: None)
+    streamer = Mock()
+    monkeypatch.setattr(page_module, "camera_streamer", streamer)
     code = Rooms(service).create(plan)
     ui = AppTest.from_string("from spectra.therapist_panel.app import main\nmain()")
     ui.query_params["sala"] = code
@@ -282,6 +388,9 @@ def test_patient_ui_admits_by_code_and_pin_without_therapist_login(service, plan
     assert not ui.exception
     assert ui.session_state["browser_stage"] == "exercise"
     assert ui.session_state["browser_session"].pain_before == 0
+    assert _button(ui, "Próximo exercício").disabled
+    assert any(expander.label == "Como fazer este exercício" for expander in ui.expander)
+    assert streamer.call_args.args[0] is ui.session_state["browser_session"]
     _button(ui, "Finalizar e salvar sessão").click().run()
     assert not ui.exception
     assert ui.session_state["browser_session"].finished
@@ -289,6 +398,121 @@ def test_patient_ui_admits_by_code_and_pin_without_therapist_login(service, plan
 
 def _button(ui, label):
     return next(button for button in ui.button if button.label == label)
+
+
+def test_direct_preview_worker_is_sendonly_and_does_not_encode_video(browser, monkeypatch):
+    from unittest.mock import Mock
+
+    from streamlit_webrtc import WebRtcMode
+
+    import spectra.browser.video as video
+
+    worker = Mock()
+    monkeypatch.setattr(video, "WebRtcWorker", worker)
+    video._create_worker(browser)
+    options = worker.call_args.kwargs
+    assert options["mode"] is WebRtcMode.SENDONLY
+    assert options["async_processing"] is True
+    assert options["video_receiver_size"] == 1
+    assert not options["sendback_video"] and not options["sendback_audio"]
+    assert options["rtc_configuration"].iceServers == []
+    assert not any(
+        options.get(key)
+        for key in ("on_video_ended", "video_frame_callback", "queued_video_frames_callback")
+    )
+    assert options["video_processor_factory"]().session is browser
+
+
+def test_camera_signals_answer_once_and_cleans_up_worker(browser, monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    from streamlit.testing.v1 import AppTest
+
+    import spectra.browser.video as video
+
+    worker = Mock()
+    worker.pc.localDescription = SimpleNamespace(sdp="answer-sdp", type="answer")
+    create = Mock(return_value=worker)
+    component = Mock(
+        return_value={
+            "playing": True,
+            "id": "offer-1",
+            "offer": {"sdp": "offer-sdp", "type": "offer"},
+        }
+    )
+    monkeypatch.setattr(video, "_component", component)
+    monkeypatch.setattr(video, "_create_worker", create)
+    ui = AppTest.from_string(
+        "import streamlit as st\n"
+        "from spectra.browser.video import camera_streamer\n"
+        "camera_streamer(st.session_state['test_session'])"
+    )
+    ui.session_state["test_session"] = browser
+    ui.run()
+    assert not ui.exception
+    create.assert_called_once_with(browser)
+    worker.process_offer.assert_called_once_with("offer-sdp", "offer", timeout=15)
+    assert component.call_args.kwargs["answer"] == {
+        "id": "offer-1",
+        "sdp": "answer-sdp",
+        "type": "answer",
+    }
+    component.return_value = {"playing": False}
+    ui.run()
+    assert not ui.exception
+    worker.stop.assert_called_once()
+    assert browser.finished and not browser.saved
+
+
+@pytest.mark.parametrize("error", ["NotAllowedError", "ConnectionTimeout"])
+def test_camera_error_finishes_without_saving_an_empty_session(browser, monkeypatch, error):
+    from unittest.mock import Mock
+
+    from streamlit.testing.v1 import AppTest
+
+    import spectra.browser.video as video
+
+    monkeypatch.setattr(video, "_component", Mock(return_value={"playing": False, "error": error}))
+    ui = AppTest.from_string(
+        "import streamlit as st\n"
+        "from spectra.browser.video import camera_streamer\n"
+        "camera_streamer(st.session_state['test_session'])"
+    )
+    ui.session_state["test_session"] = browser
+    ui.run()
+    assert not ui.exception
+    assert ui.error
+    assert browser.finished and not browser.saved
+    assert browser.error_key == "browser.processing_error"
+
+
+def test_camera_negotiation_failure_stops_worker_and_surfaces_error(browser, monkeypatch):
+    from unittest.mock import Mock
+
+    from streamlit.testing.v1 import AppTest
+
+    import spectra.browser.video as video
+
+    worker = Mock()
+    worker.process_offer.side_effect = RuntimeError("test negotiation failure")
+    monkeypatch.setattr(video, "_create_worker", Mock(return_value=worker))
+    monkeypatch.setattr(
+        video,
+        "_component",
+        Mock(return_value={"playing": True, "id": "offer", "offer": {"sdp": "", "type": "offer"}}),
+    )
+    ui = AppTest.from_string(
+        "import streamlit as st\n"
+        "from spectra.browser.video import camera_streamer\n"
+        "camera_streamer(st.session_state['test_session'])"
+    )
+    ui.session_state["test_session"] = browser
+    ui.run()
+    assert ui.exception[0].message == "test negotiation failure"
+    worker.stop.assert_called_once()
+    assert browser.finished and not browser.saved
+    assert browser.error_key == "browser.processing_error"
 
 
 def test_severe_pain_before_session_blocks_exercise_and_releases_room(service, plan, monkeypatch):
@@ -344,6 +568,13 @@ def test_live_status_is_published_for_the_therapist_monitor(browser, clock):
     assert status.exercise == "open_close" and status.exercise_total == 1
     assert status.limit_seconds == 300 and 0 < status.time_fraction < 1
     assert live_status("unknown") is None
+
+
+def test_live_status_only_marks_the_treated_hand_as_visible(browser):
+    browser.process(np.zeros((720, 960, 3), dtype=np.uint8))
+    browser._detector.result = make_detection((True,) * 5, label="Left")
+    browser.process(np.zeros((720, 960, 3), dtype=np.uint8))
+    assert browser.status().hand_visible is False
 
 
 def test_room_overview_derives_status_without_secrets(service, plan, clock):

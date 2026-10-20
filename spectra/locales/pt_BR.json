@@ -409,6 +409,8 @@
     "ended": "Sessão encerrada.",
     "no_frames": "Nenhuma imagem chegou ao SPECTRA. A sala foi liberada sem salvar métricas. Confira a permissão da câmera e tente entrar novamente.",
     "waiting_camera": "Aguardando imagens da câmera. A sessão ainda não começou.",
+    "camera_connecting": "Conectando a análise dos movimentos…",
+    "camera_connected": "Câmera ao vivo · análise dos movimentos em paralelo",
     "saved": "Sessão encerrada e métricas salvas. Consulte o histórico no painel.",
     "progress": "{exercise} — {reps} repetições no exercício atual",
     "invalid_plan": "Selecione ao menos um exercício de fisioterapia e uma duração entre 5 e 40 minutos.",
@@ -442,7 +444,7 @@
     },
     "instructions": {
       "open_close_1": "1. Abra a mão completamente (4+ dedos levantados)",
-      "open_close_2": "2. Feche em punho (0 dedos levantados)",
+      "open_close_2": "2. Feche em punho, sem forçar (até 1 dedo pode permanecer levantado)",
       "open_close_3": "3. Repita suavemente, sem forçar",
       "finger_touch_1": "1. Toque o polegar na ponta do indicador",
       "finger_touch_2": "2. Forme uma pinça e solte",
@@ -534,6 +536,8 @@
       },
       "coach": {
         "show_hand": "Não estou vendo sua mão. Mostre a palma para a câmera, com o punho dentro da imagem.",
+        "show_left_hand": "Não estou vendo sua mão esquerda. Mostre a palma para a câmera, com o punho dentro da imagem.",
+        "show_right_hand": "Não estou vendo sua mão direita. Mostre a palma para a câmera, com o punho dentro da imagem.",
         "keep_going": "Ótimo ritmo! Faça movimentos lentos e completos, sem forçar.",
         "halfway": "Mais da metade! Respire e continue no seu ritmo.",
         "exercise_done": "Exercício concluído! Avance para o próximo quando estiver pronto(a)."
@@ -565,6 +569,10 @@
       "pending": "Marque os itens do checklist para continuar."
     },
     "live": {
+      "camera_hint": "Prévia em espelho, análise em paralelo. Mostre somente a mão da sessão, com o punho visível.",
+      "camera_help": "Ajuda com a câmera e privacidade",
+      "instructions": "Como fazer este exercício",
+      "next": "Próximo exercício",
       "remaining": "restantes",
       "exercise": "Exercício {current}/{total}",
       "reps": "Repetições",

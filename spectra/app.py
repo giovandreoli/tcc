@@ -160,7 +160,9 @@ class SpectraApp:
             self._service = None
 
     # ------------------------------------------------------------------ setup
-    def build_modes(self, width: int, height: int, *, require_pin: bool = True) -> None:
+    def build_modes(
+        self, width: int, height: int, *, require_pin: bool = True, camera_overlay: bool = True
+    ) -> None:
         profile_name = self._session.gesture_profile_name if self._session else "standard"
         calibration = (
             self._service.calibration_for(self._session.patient_id)
@@ -176,6 +178,7 @@ class SpectraApp:
             gesture_profile=get_preset(profile_name),
             recorder=self.recorder,
             guard=self.guard,
+            camera_overlay=camera_overlay,
             **({"calibration": calibration} if calibration else {}),
         )
         self.modes = {mode: factory(context) for mode, factory in MODE_FACTORIES.items()}
@@ -210,14 +213,15 @@ class SpectraApp:
         output, action = handler.process(frame, detection)
         for hand in detection.hands:
             draw_hand_landmarks(output, hand.landmarks)
-        draw_status_bar(output, self.mode.title, t("app.interact_hint"))
-        draw_text(
-            output,
-            t("common.fps", fps=f"{self.fps.tick():.0f}"),
-            (output.shape[1] - 78, 18),
-            0.46,
-            (110, 110, 110),
-        )
+        if handler.context.camera_overlay:
+            draw_status_bar(output, self.mode.title, t("app.interact_hint"))
+            draw_text(
+                output,
+                t("common.fps", fps=f"{self.fps.tick():.0f}"),
+                (output.shape[1] - 78, 18),
+                0.46,
+                (110, 110, 110),
+            )
         self._draw_safety(output)
         return output, action
 

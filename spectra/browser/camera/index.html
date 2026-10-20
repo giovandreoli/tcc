@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font: 15px "Segoe UI", sans-serif; color: #1f1b3a; }
+    video { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: contain;
+      background: #eeedf5; border-radius: 16px; transform: scaleX(-1); }
+    .controls { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+    button, select { border-radius: 10px; padding: 10px 14px; font: inherit;
+      border: 1px solid #d6d1ee; background: white; color: #1f1b3a; }
+    button { cursor: pointer; background: #5342cf; color: white; }
+    button:disabled, select:disabled { opacity: .6; cursor: default; }
+    :focus-visible { outline: 3px solid #148575; outline-offset: 2px; }
+    #status { min-height: 1.4em; margin: 8px 0 0; }
+    .error { color: #a51d30; }
+  </style>
+</head>
+<body>
+  <video id="preview" autoplay playsinline muted aria-label="Prévia da câmera em espelho"></video>
+  <div class="controls">
+    <button id="toggle" type="button"></button>
+    <select id="device" aria-label="Selecionar câmera"></select>
+  </div>
+  <p id="status" role="status" aria-live="polite"></p>
+  <script src="camera.js"></script>
+</body>
+</html>

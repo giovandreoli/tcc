@@ -426,3 +426,32 @@ existing metrics and report pipeline.
 **D-088 — Launch the panel by double-click, preferring the verified Python 3.12 environment.**
 The launcher checks `.venv-py312` before legacy environment folders, binds to localhost and
 disables usage statistics. Patients enter through a button or code, never a shell command.
+
+## Interface and patient experience
+
+**D-089 — A friendly ghost mascot ("Spectro") as a guide, rendered as a data-URI image.**
+It matches the SPECTRA name and gives instructions in plain language with six moods. Streamlit's
+HTML sanitizer strips inline SVG, so the SVG is base64-embedded in an `<img>`; its internal
+animations honour `prefers-reduced-motion`. No external fonts, scripts or images are loaded.
+
+**D-090 — Four-step patient flow: enter, prepare, exercise, finish.**
+A preparation checklist gates the camera, and the finish step shows a summary. Step changes use
+widget callbacks instead of `st.rerun()` after a button so stale widgets are never rendered.
+
+**D-091 — Pain check-in (0–10 numeric scale) before and after each session.**
+Both values use the existing `session.pain_before/pain_after` columns. Pain ≥ 8 before blocks the
+exercise and releases the room; pain ≥ 8 after, or an increase ≥ 3, advises contacting the
+therapist. `pain_after` is written once and only for finished sessions. These thresholds are
+safety prompts, not clinical diagnosis.
+
+**D-092 — Live room monitor shares counters only, in process.**
+Patient and panel tabs run in the same local Streamlit process, so a weak-reference registry
+exposes exercise, repetitions, hand visibility and time progress. Frames are never shared or
+stored. Room status (waiting/active/completed/interrupted/expired) is derived from SQLite.
+
+**D-093 — Accessibility toggles for larger text and high contrast.**
+They are session-scoped CSS overrides available on both the panel and the patient page.
+
+**D-094 — Restore `spectra/reports` and un-ignore it.**
+The `.gitignore` rule `reports/` also matched the package, so it was never committed. The rule
+now has the exception `!/spectra/reports/`, and `webui/*.css` is shipped as package data.

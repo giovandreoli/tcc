@@ -136,10 +136,20 @@ exercícios. A opção padrão é **No navegador (local, sem comandos)**.
 
 1. Clique em **Iniciar sessão** no painel para gerar o código da sala.
 2. Clique em **Abrir sessão do paciente**: uma nova aba recebe o código automaticamente.
-3. O paciente confirma o PIN e clica em **Entrar na sessão**.
-4. Clique em **Iniciar câmera** e autorize o acesso à webcam no Chrome ou Edge.
-5. Os exercícios aparecem na própria imagem. Aponte e mantenha sobre os botões para avançar.
-6. Clique em **Finalizar e salvar sessão**, ou pare a câmera, para salvar as métricas no histórico.
+3. **Entrar:** o paciente confirma o PIN e clica em **Entrar na sessão**.
+4. **Preparar:** o paciente informa a dor atual (escala 0–10), confirma a lista de preparo
+   (mão visível, boa iluminação, espaço livre, sem dor forte) e vê a prévia dos exercícios.
+   Com dor **8 ou mais**, o exercício é bloqueado e o paciente é orientado a falar com o
+   fisioterapeuta.
+5. **Exercitar:** clique em **Iniciar câmera** e autorize a webcam no Chrome ou Edge. O
+   Spectro (o fantasminha guia) acompanha com dicas, anel de tempo e repetições.
+6. Clique em **Finalizar e salvar sessão**, ou pare a câmera, para salvar as métricas.
+7. **Concluir:** o paciente vê o resumo e informa a dor após a sessão. Dor 8 ou mais, ou
+   aumento de 3 pontos ou mais, exibe um aviso para conversar com o fisioterapeuta.
+
+Enquanto isso, a tela **Início** do painel mostra as salas ao vivo (aguardando, em andamento,
+concluída, interrompida), com exercício atual, repetições, mão visível e progresso. Apenas
+contadores são compartilhados entre as abas; nenhuma imagem é guardada ou transmitida.
 
 O paciente não precisa executar comandos nem instalar outro aplicativo. Para iniciar o painel,
 o profissional pode dar dois cliques em `scripts\painel.bat`. O atalho procura primeiro o
@@ -185,8 +195,18 @@ Opções: `--hand Left|Right`, `--camera N`, `--data-dir CAMINHO`, `--no-sound`,
 
 ### 6. Relatórios e evolução
 
-Em **Histórico e evolução**: gráficos por métrica ao longo das sessões, geração e download do
-PDF e do TXT, e exportação para a pasta compartilhada.
+Em **Histórico e evolução**: gráficos por métrica ao longo das sessões, dor antes e depois de
+cada sessão, geração e download do PDF e do TXT, e exportação para a pasta compartilhada.
+
+A tela **Início** resume a semana: pacientes, sessões e minutos em 7 dias, alívio médio de dor
+e pacientes sem TCLE ativo, com dicas do Spectro sobre o próximo passo.
+
+### Interface e acessibilidade
+
+- Animação de abertura com o mascote **Spectro** (uma vez por sessão do navegador).
+- Painel **Acessibilidade** com **Texto maior** e **Alto contraste**, no painel e na página
+  do paciente. As animações respeitam a preferência de movimento reduzido do sistema.
+- Tudo funciona offline: sem fontes, scripts ou imagens externas.
 
 ### 7. Modo demonstração
 

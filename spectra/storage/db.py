@@ -615,6 +615,18 @@ class Database:
         )
         return session
 
+    def record_pain_after(self, session_id: str, pain: int) -> bool:
+        """Store the post-session pain score once, only for a finished session."""
+        if not 0 <= pain <= 10:
+            raise ValueError("pain must be on the 0-10 scale")
+        updated = self._connection.execute(
+            "UPDATE session SET pain_after = ?"
+            " WHERE id = ? AND ended_at IS NOT NULL AND pain_after IS NULL",
+            (pain, session_id),
+        )
+        self._connection.commit()
+        return updated.rowcount == 1
+
     def get_session(self, session_id: str) -> Session | None:
         row = self._connection.execute(
             "SELECT * FROM session WHERE id = ?", (session_id,)

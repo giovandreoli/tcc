@@ -38,9 +38,48 @@ class RoomAdmission:
     exercises: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class RoomInfo:
+    """A room as seen by the therapist monitor. Holds no code, claim or PIN."""
+
+    session_id: str
+    patient_id: str
+    status: str
+    created_at: float
+    expires_at: float
+
+
 class Rooms:
     def __init__(self, service: SpectraService) -> None:
         self.service = service
+
+    def overview(self, window_seconds: float = 12 * 3600) -> list[RoomInfo]:
+        """Rooms created in the recent window, newest first, with a derived status."""
+        now = utc_now()
+        with self.service.db.transaction() as connection:
+            rows = connection.execute(
+                "SELECT r.session_id, r.status, r.expires_at, r.heartbeat_at, s.patient_id"
+                " FROM browser_room r JOIN session s ON s.id = r.session_id"
+                " WHERE r.expires_at > ? ORDER BY r.expires_at DESC",
+                (now - window_seconds + ROOM_LIFETIME_SECONDS,),
+            ).fetchall()
+        rooms = []
+        for row in rows:
+            status = row["status"]
+            if status == "active" and (row["heartbeat_at"] or 0) < now - LEASE_SECONDS:
+                status = "interrupted"
+            elif status == "waiting" and row["expires_at"] <= now:
+                status = "expired"
+            rooms.append(
+                RoomInfo(
+                    session_id=row["session_id"],
+                    patient_id=row["patient_id"],
+                    status=status,
+                    created_at=row["expires_at"] - ROOM_LIFETIME_SECONDS,
+                    expires_at=row["expires_at"],
+                )
+            )
+        return rooms
 
     def create(self, plan: SessionPlan) -> str:
         if (

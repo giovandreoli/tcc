@@ -229,7 +229,7 @@ def test_browser_time_limit_finishes_session(browser, service, clock):
 def test_save_failure_is_not_reported_as_success(browser, monkeypatch):
     browser.process(np.zeros((720, 960, 3), dtype=np.uint8))
 
-    def fail():
+    def fail(**kwargs):
         raise RuntimeError("test write failure")
 
     monkeypatch.setattr(browser._app, "finish_session", fail)
@@ -272,9 +272,113 @@ def test_patient_ui_admits_by_code_and_pin_without_therapist_login(service, plan
     assert not ui.exception
     assert ui.session_state["browser_session"].admission.exercises == ("open_close",)
     assert ui.query_params == {"paciente": ["1"]}
-    ui.button[0].click().run()
+    assert ui.session_state["browser_stage"] == "prepare"
+    ready = _button(ui, "Estou pronto(a), abrir a câmera")
+    assert ready.disabled  # The environment checklist gates the camera.
+    for checkbox in ui.checkbox:
+        checkbox.check()
+    ui.run()
+    _button(ui, "Estou pronto(a), abrir a câmera").click().run()
+    assert not ui.exception
+    assert ui.session_state["browser_stage"] == "exercise"
+    assert ui.session_state["browser_session"].pain_before == 0
+    _button(ui, "Finalizar e salvar sessão").click().run()
     assert not ui.exception
     assert ui.session_state["browser_session"].finished
+
+
+def _button(ui, label):
+    return next(button for button in ui.button if button.label == label)
+
+
+def test_severe_pain_before_session_blocks_exercise_and_releases_room(service, plan, monkeypatch):
+    from streamlit.testing.v1 import AppTest
+
+    import spectra.therapist_panel.app as panel_module
+
+    monkeypatch.setattr(panel_module, "get_service", lambda: service)
+    code = Rooms(service).create(plan)
+    ui = AppTest.from_string("from spectra.therapist_panel.app import main\nmain()")
+    ui.query_params["sala"] = code
+    ui.run()
+    ui.text_input[1].input("1234")
+    ui.button[0].click().run()
+    ui.select_slider(key="pain_before").set_value(9).run()
+    assert not ui.exception
+    assert all(button.label != "Estou pronto(a), abrir a câmera" for button in ui.button)
+    _button(ui, "Encerrar sem exercitar").click().run()
+    assert ui.session_state["browser_stage"] == "left"
+    with service.db.transaction() as connection:
+        assert connection.execute("SELECT status FROM browser_room").fetchone()[0] == "waiting"
+
+
+def test_pain_scores_are_saved_with_the_session(browser, service, clock):
+    browser.pain_before = 6
+    browser.process(np.zeros((720, 960, 3), dtype=np.uint8))
+    browser.finish()
+    session_id = browser.admission.session.id
+    assert service.db.get_session(session_id).pain_before == 6
+    assert service.db.record_pain_after(session_id, 3)
+    assert not service.db.record_pain_after(session_id, 1)  # Recorded once only.
+    assert service.db.get_session(session_id).pain_after == 3
+    with pytest.raises(ValueError):
+        service.db.record_pain_after(session_id, 11)
+
+
+def test_pain_after_requires_a_finished_session(browser, service):
+    assert not service.db.record_pain_after(browser.admission.session.id, 2)
+
+
+def test_live_status_is_published_for_the_therapist_monitor(browser, clock):
+    from spectra.browser.live import live_status
+
+    session_id = browser.admission.session.id
+    assert live_status(session_id).frames == 0
+    frame = np.zeros((720, 960, 3), dtype=np.uint8)
+    browser.process(frame)
+    browser._detector.result = make_detection((True,) * 5)
+    clock.advance(30)
+    browser.process(frame)
+    status = live_status(session_id)
+    assert status.frames == 2 and status.hand_visible
+    assert status.exercise == "open_close" and status.exercise_total == 1
+    assert status.limit_seconds == 300 and 0 < status.time_fraction < 1
+    assert live_status("unknown") is None
+
+
+def test_room_overview_derives_status_without_secrets(service, plan, clock):
+    rooms = Rooms(service)
+    code = rooms.create(plan)
+    [room] = rooms.overview()
+    assert room.status == "waiting" and room.patient_id == plan.patient_id
+    assert code not in repr(room)
+    rooms.admit(code, "1234")
+    assert rooms.overview()[0].status == "active"
+    clock.advance(LEASE_SECONDS + 1)
+    assert rooms.overview()[0].status == "interrupted"
+    clock.advance(ROOM_LIFETIME_SECONDS)
+    assert rooms.overview()[0].status == "interrupted"
+    clock.advance(13 * 3600)
+    assert rooms.overview() == []
+
+
+def test_therapist_home_shows_dashboard_and_room_monitor(service, plan):
+    from streamlit.testing.v1 import AppTest
+
+    Rooms(service).create(plan)
+    ui = AppTest.from_string(
+        "import streamlit as st\n"
+        "from spectra.therapist_panel.app import render_home\n"
+        "render_home(st.session_state['_test_service'])"
+    )
+    ui.session_state["_test_service"] = service
+    ui.session_state["therapist_name"] = "Ana Souza"
+    ui.run()
+    assert not ui.exception
+    html = "".join(element.proto.body for element in ui.get("html"))
+    assert "Olá, Ana!" in html
+    assert "Aguardando paciente" in html
+    assert "sp-ghost" in html
 
 
 def test_panel_creates_browser_room_and_button_instead_of_command(service, plan):

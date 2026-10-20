@@ -7,13 +7,13 @@ import threading
 import time
 from dataclasses import replace
 
-import cv2
 import numpy as np
 
 from spectra.app import SpectraApp
 from spectra.browser import live
 from spectra.browser.rooms import RoomAdmission, Rooms
 from spectra.config import AppConfig
+from spectra.core.session_guard import SafetyPrompt
 from spectra.detection.hand_detector import HandDetector
 from spectra.i18n import t
 from spectra.modes.base import ACTION_MENU, ACTION_QUIT, AppMode
@@ -45,6 +45,8 @@ class BrowserSession:
         self._total_reps = 0
         self._exercise_index = 0
         self._hand_visible = False
+        self._safety_key: str | None = None
+        self._safety_until = 0.0
         self._exercise = admission.exercises[0]
         live.register(admission.session.id, self)
 
@@ -52,6 +54,8 @@ class BrowserSession:
         self._detector = HandDetector(
             self.config.model_path(),
             detection_size=(self.config.detection_width, self.config.detection_height),
+            num_hands=1,
+            video_mode=True,
         )
         with SpectraService.open(self.config) as service, service.db.transaction() as connection:
             connection.execute(
@@ -62,7 +66,7 @@ class BrowserSession:
         self._app = app
         app.attach_session()
         height, width = frame.shape[:2]
-        app.build_modes(width, height, require_pin=False)
+        app.build_modes(width, height, require_pin=False, camera_overlay=False)
         mode = app.modes[AppMode.PHYSIO]
         if not isinstance(mode, PhysioMode):
             raise RuntimeError("physiotherapy mode is unavailable")
@@ -90,17 +94,17 @@ class BrowserSession:
                 app, detector = self._app, self._detector
                 if app is None or detector is None:
                     raise RuntimeError("browser session initialization failed")
-                mirrored = cv2.flip(frame, 1)
-                detection = detector.detect(mirrored)
-                self._hand_visible = bool(detection.hands)
-                output, action = app.render_frame(mirrored, detection)
+                # Analyze camera pixels, not the mirrored browser preview.
+                detection = detector.detect(frame)
+                self._hand_visible = detection.for_label(app.hand_label) is not None
                 mode = app.modes[AppMode.PHYSIO]
+                output, action = mode.process(frame, detection)
                 if isinstance(mode, PhysioMode):
-                    self._reps = mode.progress.reps
-                    self._target = mode.progress.target
-                    self._exercise_index = mode.exercise_index
-                    self._total_reps = mode.progress.reps + sum(r.reps for r in mode.history)
-                    self._exercise = mode.current_exercise.value
+                    self._sync_progress(mode)
+                prompt = app.guard.check()
+                if prompt is not SafetyPrompt.NONE:
+                    self._safety_key = f"safety.{prompt.value}"
+                    self._safety_until = time.monotonic() + 8
                 if action in (ACTION_MENU, ACTION_QUIT) or app.guard.expired:
                     self.finish()
                 return output
@@ -111,6 +115,23 @@ class BrowserSession:
             finally:
                 if self._app is not None:
                     self._app.close_storage()
+
+    def _sync_progress(self, mode: PhysioMode) -> None:
+        self._reps = mode.progress.reps
+        self._target = mode.progress.target
+        self._exercise_index = mode.exercise_index
+        self._total_reps = mode.progress.reps + sum(r.reps for r in mode.history)
+        self._exercise = mode.current_exercise.value
+
+    def next_exercise(self) -> None:
+        with self._lock:
+            if self.finished or self.error_key or self._app is None:
+                raise RuntimeError("cannot advance an inactive browser session")
+            mode = self._app.modes[AppMode.PHYSIO]
+            if not isinstance(mode, PhysioMode):
+                raise RuntimeError("physiotherapy mode is unavailable")
+            mode.next_exercise()
+            self._sync_progress(mode)
 
     def finish(self) -> None:
         with self._lock:
@@ -165,4 +186,5 @@ class BrowserSession:
                 limit_seconds=self.admission.duration_minutes * 60.0,
                 exercise_index=self._exercise_index,
                 exercise_total=len(self.admission.exercises),
+                safety_key=(self._safety_key if time.monotonic() < self._safety_until else None),
             )

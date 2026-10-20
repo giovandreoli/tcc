@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from spectra.detection.hand_detector import DetectedHand, DetectionResult, handedness_label
 from spectra.detection.landmarks import FINGER_CHAINS, HAND_CONNECTIONS, LANDMARK_COUNT
@@ -10,6 +11,73 @@ from spectra.ui.sound import SoundPlayer
 from spectra.ui.text import ascii_fold, draw_text, text_size
 from spectra.ui.widgets import dim_frame, draw_finger_hud, draw_hand_landmarks, draw_progress_bar
 from tests.conftest import make_hand
+
+
+@pytest.fixture
+def mediapipe_stub(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    import spectra.detection.hand_detector as detector_module
+
+    result = SimpleNamespace(
+        hand_landmarks=[make_hand(index=True)],
+        handedness=[[SimpleNamespace(category_name="Right", score=0.9)]],
+    )
+    detector = Mock()
+    detector.detect.return_value = result
+    detector.detect_for_video.return_value = result
+    create = Mock(return_value=detector)
+    vision = SimpleNamespace(
+        HandLandmarkerOptions=SimpleNamespace,
+        HandLandmarker=SimpleNamespace(create_from_options=create),
+        RunningMode=SimpleNamespace(IMAGE="image", VIDEO="video"),
+    )
+    python = SimpleNamespace(BaseOptions=SimpleNamespace, vision=vision)
+    monkeypatch.setitem(
+        sys.modules,
+        "mediapipe",
+        SimpleNamespace(Image=SimpleNamespace, ImageFormat=SimpleNamespace(SRGB=1)),
+    )
+    monkeypatch.setitem(sys.modules, "mediapipe.tasks", SimpleNamespace(python=python))
+    monkeypatch.setitem(sys.modules, "mediapipe.tasks.python", python)
+    monkeypatch.setattr(detector_module, "ensure_model", lambda path: path)
+    return detector, create
+
+
+def test_video_detector_uses_tracking_and_strictly_increasing_timestamps(
+    mediapipe_stub, monkeypatch, tmp_path
+):
+    import spectra.detection.hand_detector as detector_module
+
+    detector, create = mediapipe_stub
+    clock = iter((10_000_000, 10_000_000, 9_000_000, 14_000_000))
+    monkeypatch.setattr(detector_module, "monotonic_ns", lambda: next(clock))
+    with detector_module.HandDetector(
+        tmp_path / "model.task", video_mode=True, num_hands=1
+    ) as hand:
+        for _ in range(4):
+            result = hand.detect(np.zeros((540, 960, 3), dtype=np.uint8))
+            assert result.primary.label == "Right"
+            assert result.primary.score == 0.9
+    options = create.call_args.args[0]
+    assert options.running_mode == "video" and options.num_hands == 1
+    assert [call.args[1] for call in detector.detect_for_video.call_args_list] == [10, 11, 12, 14]
+    detector.detect.assert_not_called()
+    detector.close.assert_called_once()
+
+
+def test_default_detector_keeps_image_mode(mediapipe_stub, tmp_path):
+    from spectra.detection.hand_detector import HandDetector
+
+    detector, create = mediapipe_stub
+    with HandDetector(tmp_path / "model.task") as hand:
+        hand.detect(np.zeros((540, 960, 3), dtype=np.uint8))
+    assert create.call_args.args[0].running_mode == "image"
+    assert create.call_args.args[0].num_hands == 2
+    detector.detect.assert_called_once()
+    detector.detect_for_video.assert_not_called()
 
 
 class TestAsciiFold:

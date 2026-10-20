@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from time import monotonic_ns
 
 import cv2
 import numpy as np
@@ -75,14 +76,19 @@ class HandDetector:
         min_detection_confidence: float = 0.5,
         min_presence_confidence: float = 0.5,
         min_tracking_confidence: float = 0.5,
+        *,
+        video_mode: bool = False,
     ) -> None:
         from mediapipe.tasks import python as mp_python
         from mediapipe.tasks.python import vision
 
         self._model_path = ensure_model(model_path)
         self._detection_size = detection_size
+        self._video_mode = video_mode
+        self._last_timestamp_ms = -1
         options = vision.HandLandmarkerOptions(
             base_options=mp_python.BaseOptions(model_asset_path=str(self._model_path)),
+            running_mode=vision.RunningMode.VIDEO if video_mode else vision.RunningMode.IMAGE,
             num_hands=num_hands,
             min_hand_detection_confidence=min_detection_confidence,
             min_hand_presence_confidence=min_presence_confidence,
@@ -96,7 +102,12 @@ class HandDetector:
         small = cv2.resize(frame_bgr, self._detection_size, interpolation=cv2.INTER_LINEAR)
         rgb = cv2.cvtColor(small, cv2.COLOR_BGR2RGB)
         image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
-        result = self._detector.detect(image)
+        if self._video_mode:
+            timestamp_ms = max(self._last_timestamp_ms + 1, monotonic_ns() // 1_000_000)
+            self._last_timestamp_ms = timestamp_ms
+            result = self._detector.detect_for_video(image, timestamp_ms)
+        else:
+            result = self._detector.detect(image)
 
         hands_landmarks = result.hand_landmarks or []
         handedness = result.handedness or []

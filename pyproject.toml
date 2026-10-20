@@ -18,7 +18,7 @@ spectra = "spectra.__main__:main"
 include = ["spectra*"]
 
 [tool.setuptools.package-data]
-spectra = ["locales/*.json", "locales/*.md", "webui/*.css"]
+spectra = ["locales/*.json", "locales/*.md", "webui/*.css", "browser/camera/*.html", "browser/camera/*.js"]
 
 [tool.black]
 line-length = 100

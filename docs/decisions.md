@@ -455,3 +455,31 @@ They are session-scoped CSS overrides available on both the panel and the patien
 **D-094 — Restore `spectra/reports` and un-ignore it.**
 The `.gitignore` rule `reports/` also matched the package, so it was never committed. The rule
 now has the exception `!/spectra/reports/`, and `webui/*.css` is shipped as package data.
+
+**D-095 — Keep video processing and track finalization in the same processor API.**
+In streamlit-webrtc 0.63.11, any standalone video callback, including `on_video_ended`,
+takes precedence over `video_processor_factory`. Mixing them silently bypasses hand
+detection and returns unprocessed video. `ExerciseVideoProcessor.on_ended()` finalizes
+the session instead. Async processing runs inference outside the WebRTC event loop.
+Regression tests cover both processor lifecycle and the streamer's actual arguments.
+
+**D-096 — Use single-hand VIDEO tracking for browser exercises.**
+IMAGE mode reruns palm detection independently on each frame. Browser sessions opt into
+VIDEO mode with strictly increasing monotonic millisecond timestamps and one hand, so a
+tracked treatment hand can be reused without searching for a second hand each frame.
+Desktop callers retain IMAGE mode and two hands by default. The browser requests at most
+960 by 540 pixels at 30 fps instead of 960 by 720, reducing capture/transport pixels by 25%
+without deliberately lowering temporal sampling. Actual frame rate still depends on hardware;
+existing tremor-quality checks continue to reject insufficient sampling.
+
+**D-097 — Decouple local preview from inference; mirror display only.**
+The user chose a fluid local preview over landmark overlays. A packaged, dependency-free
+camera component displays its local track directly; the stock SENDONLY frontend does not
+render a preview. A small adapter reuses the pinned streamlit-webrtc 0.63.11 WebRtcWorker
+for SENDONLY signaling, while the asynchronous processor analyzes incoming frames; no
+processed video is sent back or encoded. The receiver holds one frame and the processor's
+default queued handler analyzes the newest input. Display frame rate is independent of
+inference throughput; repetition counting and metrics still use real analyzed samples.
+The former pre-inference horizontal flip inverted the reported treatment hand in practice.
+It is removed: only the preview is mirrored with CSS. Tests cover unmodified input pixels,
+both treatment hands, SENDONLY wiring, repetition counting, rest prompts and finalization.

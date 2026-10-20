@@ -44,6 +44,12 @@ def run_gesture(mode, pattern, clock, seconds: float = 1.0, step: float = 0.05):
 
 
 class TestSmoke:
+    def test_desktop_physio_keeps_its_overlay(self, context, empty_detection):
+        mode = PhysioMode(context)
+        assert context.camera_overlay is True
+        output, _ = mode.process(blank_frame(), empty_detection)
+        assert output.any()
+
     @pytest.mark.parametrize("mode_class", MODES)
     def test_process_runs_headless_without_a_hand(self, mode_class, context, empty_detection):
         output, action = mode_class(context).process(blank_frame(), empty_detection)
@@ -167,7 +173,7 @@ class TestPhysioMetricHooks:
     def test_each_exercise_run_exposes_a_time_window(self, context):
         mode = PhysioMode(context)
         start = mode.progress.started_at
-        mode._next_exercise()
+        mode.next_exercise()
         finished = mode.history[-1]
         assert finished.window[0] == start
         assert finished.ended_at is not None

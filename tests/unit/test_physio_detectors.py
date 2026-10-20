@@ -27,6 +27,12 @@ class TestOpenCloseDetector:
         detector = OpenCloseDetector()
         assert [detector.update(OPEN) for _ in range(5)] == [False] * 5
 
+    def test_counts_close_when_one_finger_remains_extended(self):
+        detector = OpenCloseDetector()
+        partial_fist = FingerStates(True, False, False, False, False)
+        assert detector.update(OPEN) is False
+        assert detector.update(partial_fist) is True
+
     def test_reset_returns_to_the_open_phase(self):
         detector = OpenCloseDetector()
         detector.update(OPEN)

@@ -27,6 +27,7 @@ class LiveStatus:
     limit_seconds: float
     exercise_index: int
     exercise_total: int
+    safety_key: str | None = None
 
     @property
     def time_fraction(self) -> float:

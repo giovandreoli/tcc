@@ -11,6 +11,11 @@ browser video through WebRTC with no external ICE servers and no audio. `browser
 serializes frame processing and finalization, reusing `SpectraApp`, `HandDetector`, the selected
 physiotherapy exercises and the existing report metrics without opening an OpenCV window.
 The duration and exercise selection are stored with the room.
+`browser/live.py` keeps a weak-reference registry of running browser sessions so the panel's
+Home screen can show live counters (never frames); `Rooms.overview()` derives room statuses.
+`webui/` holds the presentation layer: the "Spectro" mascot (`art.py`, pure HTML builders),
+the design system (`theme.css`), Streamlit wrappers (`components.py`) and dashboard
+aggregations (`insights.py`).
 
 This extension is deliberately **same-computer only**, with a localhost-bound launcher.
 Frames leave the browser for the local Python process, never for a remote service, and are
@@ -54,6 +59,7 @@ works without the vision stack installed.
 | Metrics | `metrics/` | recorder, ROM, tremor, fatigue, accuracy, quality | gestures, guided |
 | Storage | `storage/` | SQLite, encryption, audit, backup | — |
 | Reports | `reports/` | report object, TXT, PDF, charts | metrics, storage |
+| Web UI | `webui/` | mascot, theme CSS, dashboard insights | storage (models) |
 | Service | `service.py` | use cases shared by both apps | all of the above |
 | Modes | `modes/` | interactive screens | gestures, core, guided, ui |
 | Shells | `app.py`, `therapist_panel/` | camera loop; Streamlit UI | service, modes |

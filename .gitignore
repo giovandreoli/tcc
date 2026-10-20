@@ -47,6 +47,7 @@ Spectra/
 *.db-wal
 *.db-shm
 reports/
+!/spectra/reports/
 exports/
 backups/
 pintura_*.png

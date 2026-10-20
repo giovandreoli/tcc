@@ -139,7 +139,9 @@ class SpectraApp:
         guided = self.modes.get(AppMode.GUIDED_DRAW)
         return list(guided.results) if isinstance(guided, GuidedDrawMode) else []
 
-    def finish_session(self) -> None:
+    def finish_session(
+        self, *, pain_before: int | None = None, pain_after: int | None = None
+    ) -> None:
         """Compute and persist the metrics, then close the service."""
         if self._service is None or self._session is None:
             return
@@ -149,6 +151,8 @@ class SpectraApp:
                 self.recorder,
                 runs=self.collect_runs(),
                 traces=self.collect_traces(),
+                pain_before=pain_before,
+                pain_after=pain_after,
             )
             logger.info("%s", t("app.session_saved"))
         finally:

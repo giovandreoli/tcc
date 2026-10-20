@@ -213,6 +213,13 @@
     }
   },
   "report": {
+    "hand": {
+      "left": "Esquerda",
+      "right": "Direita"
+    },
+    "exercise": {
+      "guided": "Desenho guiado"
+    },
     "title": "SPECTRA — Relatório de Sessão",
     "no_notes": "Sem anotações do fisioterapeuta.",
     "demo_mode_notice": "Modo demonstração ativo: a identificação do paciente está mascarada.",
@@ -240,6 +247,7 @@
       "duration": "Duração",
       "hand": "Mão",
       "gesture_profile": "Perfil de gestos",
+      "difficulty": "Dificuldade",
       "session_number": "Sessão nº",
       "pain_before": "Dor antes (EVA)",
       "pain_after": "Dor depois (EVA)",
@@ -254,6 +262,8 @@
       "delta": "Variação"
     },
     "metric": {
+      "opposition": "Oposição do polegar — {finger}",
+      "wrist_openness": "Abertura da palma (estimativa)",
       "rom_finger": "Amplitude de movimento — {finger}",
       "wrist_rotation": "Rotação do punho (estimativa)",
       "tremor_band": "Energia espectral 4–12 Hz",
@@ -440,6 +450,130 @@
       "finger_wave_1": "1. Levante o indicador e abaixe",
       "finger_wave_2": "2. Levante o médio e abaixe",
       "finger_wave_3": "3. Repita com anelar e mínimo em sequência"
+    }
+  },
+  "ux": {
+    "splash": {
+      "tagline": "Reabilitação de mão, dedos e punho com visão computacional"
+    },
+    "mascot": {
+      "name": "Spectro, seu guia"
+    },
+    "a11y": {
+      "title": "Acessibilidade",
+      "large_text": "Texto maior",
+      "high_contrast": "Alto contraste"
+    },
+    "login": {
+      "welcome_back": "Olá de novo! Entre para acompanhar seus pacientes. Eu cuido dos lembretes."
+    },
+    "nav": {
+      "home": "🏠 Início",
+      "patients": "🧑‍🤝‍🧑 Pacientes",
+      "consent": "📝 Consentimento (TCLE)",
+      "session": "🎯 Nova sessão",
+      "history": "📈 Histórico e evolução",
+      "privacy": "🔒 Privacidade e dados"
+    },
+    "empty": {
+      "patients": "Ainda não há pacientes por aqui. Cadastre o primeiro para começar.",
+      "history": "Nenhuma sessão registrada ainda. Assim que o paciente se exercitar, a evolução aparece aqui."
+    },
+    "home": {
+      "greeting": "Olá, {name}!",
+      "subtitle": "Visão geral da semana e salas em andamento",
+      "patients": "Pacientes",
+      "patients_hint": "cadastrados neste computador",
+      "sessions_week": "Sessões (7 dias)",
+      "minutes_week": "{minutes} min de exercício",
+      "pain_relief": "Alívio médio de dor",
+      "pain_relief_hint": "antes − depois, escala 0–10",
+      "pending_consent": "Sem TCLE ativo",
+      "consent_hint": "não podem iniciar sessão",
+      "tip_first_patient": "Vamos começar? Cadastre um paciente em Pacientes e registre o TCLE.",
+      "tip_consent": "{count} paciente(s) sem consentimento ativo. Registre o TCLE antes da próxima sessão.",
+      "tip_new_session": "Nenhuma sessão nesta semana. Crie uma sala em Nova sessão. O paciente entra pelo navegador.",
+      "tip_good_week": "Boa semana! Confira a evolução de dor e amplitude em Histórico e evolução.",
+      "monitor": "Salas de sessão (ao vivo)",
+      "monitor_hint": "Acompanhe o progresso ao vivo em Início.",
+      "no_rooms": "Nenhuma sala nas últimas 12 horas.",
+      "room_created": "Criada em {time}",
+      "live": "{exercise} · {reps} reps (total {total}) · {hand}",
+      "hand_ok": "mão detectada",
+      "hand_missing": "mão fora do quadro"
+    },
+    "room": {
+      "waiting": "Aguardando paciente",
+      "active": "Em andamento",
+      "completed": "Concluída",
+      "interrupted": "Interrompida",
+      "expired": "Expirada"
+    },
+    "history": {
+      "pain_before": "Dor antes",
+      "pain_after": "Dor depois",
+      "pain_chart": "Evolução da dor (EVA 0–10)",
+      "pain_chart_hint": "Relato do próprio paciente no início e no fim de cada sessão no navegador. Não substitui a avaliação clínica."
+    },
+    "patient": {
+      "title": "Sua sessão SPECTRA",
+      "subtitle": "Exercícios para mão, dedos e punho, no seu ritmo",
+      "welcome": "Oi! Eu sou o Spectro e vou te acompanhar hoje. Digite o código da sala e seu PIN de 4 dígitos.",
+      "prepare_intro": "Antes de começar, me conte como você está e prepare o ambiente. Leva menos de um minuto.",
+      "today": "Exercícios de hoje",
+      "duration": "Duração máxima: {minutes} minutos, com lembretes de pausa.",
+      "ready": "Estou pronto(a), abrir a câmera",
+      "leave": "Encerrar sem exercitar",
+      "celebrate_title": "Sessão concluída!",
+      "celebrate": "Muito bem! Cada repetição conta para a sua recuperação. Seus resultados já estão com o fisioterapeuta.",
+      "step": {
+        "enter": "Entrar",
+        "prepare": "Preparar",
+        "exercise": "Exercitar",
+        "finish": "Concluir"
+      },
+      "coach": {
+        "show_hand": "Não estou vendo sua mão. Mostre a palma para a câmera, com o punho dentro da imagem.",
+        "keep_going": "Ótimo ritmo! Faça movimentos lentos e completos, sem forçar.",
+        "halfway": "Mais da metade! Respire e continue no seu ritmo.",
+        "exercise_done": "Exercício concluído! Avance para o próximo quando estiver pronto(a)."
+      }
+    },
+    "pain": {
+      "question": "Como está sua dor agora?",
+      "after_question": "E agora, depois dos exercícios, como está sua dor?",
+      "scale": "0 = sem dor · 10 = pior dor imaginável",
+      "save": "Registrar dor",
+      "saved": "Obrigado! Sua resposta foi registrada para o fisioterapeuta.",
+      "severe_title": "Vamos com cuidado",
+      "severe_before": "Com dor intensa, é melhor não se exercitar agora. Encerre e fale com seu fisioterapeuta.",
+      "severe_after": "Sua dor está alta ou aumentou. Descanse e avise seu fisioterapeuta antes da próxima sessão.",
+      "left": "Sessão não iniciada para sua segurança. A sala foi liberada. Converse com seu fisioterapeuta.",
+      "band": {
+        "none": "sem dor",
+        "mild": "leve",
+        "moderate": "moderada",
+        "severe": "intensa"
+      }
+    },
+    "checklist": {
+      "title": "Checklist do ambiente",
+      "light": "O ambiente está bem iluminado, sem luz forte atrás de mim",
+      "framing": "Minha mão e meu punho cabem inteiros na imagem",
+      "distance": "Estou a cerca de 50 cm da câmera, sentado(a) e confortável",
+      "comfort": "Vou parar imediatamente se sentir dor ou desconforto",
+      "pending": "Marque os itens do checklist para continuar."
+    },
+    "live": {
+      "remaining": "restantes",
+      "exercise": "Exercício {current}/{total}",
+      "reps": "Repetições",
+      "total": "{total} no total"
+    },
+    "summary": {
+      "time": "Tempo ativo",
+      "reps": "Repetições",
+      "exercises": "Exercícios"
     }
   }
 }

@@ -85,7 +85,7 @@ def test_camera_error_lists_attempted_backends_and_releases_captures(monkeypatch
         lambda index, backend: next(captures),
     )
 
-    with pytest.raises(RuntimeError, match="DirectShow.*Media Foundation.*automatic"):
+    with pytest.raises(RuntimeError, match=r"DirectShow.*Media Foundation.*automatic"):
         Camera()
 
     assert all(capture.released for capture in unavailable)

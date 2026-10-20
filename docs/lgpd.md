@@ -27,6 +27,7 @@ did not, was not added.
 | Clinical notes | Therapist's free text | **Yes** |
 | Gesture profile, calibration | Adapts the interface to the patient's ability | No |
 | 4-digit PIN | Patient authentication | Hashed (scrypt), never recoverable |
+| Pain before/after a session (0–10) | **Patient safety** and outcome measure; ≥ 8 blocks the exercise | No |
 
 ### What is deliberately **not** collected
 
@@ -57,6 +58,10 @@ Audio capture is disabled and no external ICE servers are configured. The Window
 launcher binds to localhost and disables Streamlit usage statistics. Do not expose this
 prototype directly to the internet. Closing the page normally finalizes the session, but
 a process crash may lose unsaved in-memory metrics.
+
+The therapist's live room monitor reads only in-memory counters from the same local process
+(current exercise, repetitions, whether a hand is visible, time progress). No frame, image or
+landmark is shared with the panel, and nothing extra is persisted.
 
 Remote browser-side inference and video calls require a separate deployment, authentication,
 networking and privacy review, and updated participant information before use. They are not

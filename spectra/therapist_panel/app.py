@@ -23,8 +23,19 @@ from spectra.service import PatientForm, SessionPlan, SpectraService
 from spectra.storage.db import AccountLockedError, ConsentRequiredError, DuplicateCPFError
 from spectra.storage.models import Hand, Sex
 from spectra.storage.security import mask_cpf
+from spectra.webui import art
+from spectra.webui import components as ui
+from spectra.webui.insights import overview, pain_series
 
 PAGE_TITLE = "SPECTRA"
+SECTIONS = ("home", "patients", "consent", "session", "history", "privacy")
+ROOM_TONES = {
+    "waiting": "waiting",
+    "active": "active",
+    "completed": "completed",
+    "interrupted": "expired",
+    "expired": "expired",
+}
 
 
 # --------------------------------------------------------------------- session
@@ -50,11 +61,11 @@ def _patient_label(patient) -> str:
 
 # ----------------------------------------------------------------------- login
 def render_login(service: SpectraService) -> None:
-    st.title(PAGE_TITLE)
-    st.caption(t("panel.login.subtitle"))
-
+    ui.hero(PAGE_TITLE, t("panel.login.subtitle"))
     if not service.db.list_patients() and st.session_state.get("first_run") is None:
-        st.info(t("panel.login.first_run"))
+        ui.guide("hello", t("panel.login.first_run"), t("ux.mascot.name"))
+    else:
+        ui.guide("hello", t("ux.login.welcome_back"), t("ux.mascot.name"))
 
     with st.form("login"):
         email = st.text_input(t("panel.login.email"))
@@ -88,6 +99,81 @@ def render_login(service: SpectraService) -> None:
                 st.success(t("panel.login.created"))
 
 
+# ------------------------------------------------------------------------ home
+def render_home(service: SpectraService) -> None:
+    name = st.session_state.get("therapist_name", "")
+    ui.hero(t("ux.home.greeting", name=name.split(" ")[0] if name else ""), t("ux.home.subtitle"))
+    patients = service.db.list_patients()
+    without_consent = [p for p in patients if not service.has_consent(p.id)]
+    sessions = [s for p in patients for s in service.db.list_sessions(p.id)]
+    summary = overview(len(patients), len(without_consent), sessions, dt.datetime.now().timestamp())
+    relief = summary.pain_relief_week
+    ui.stats(
+        [
+            (t("ux.home.patients"), str(summary.patients), t("ux.home.patients_hint")),
+            (
+                t("ux.home.sessions_week"),
+                str(summary.sessions_week),
+                t("ux.home.minutes_week", minutes=summary.minutes_week),
+            ),
+            (
+                t("ux.home.pain_relief"),
+                "—" if relief is None else f"{relief:+.1f}",
+                t("ux.home.pain_relief_hint"),
+            ),
+            (t("ux.home.pending_consent"), str(summary.without_consent), t("ux.home.consent_hint")),
+        ]
+    )
+
+    if not patients:
+        ui.guide("hello", t("ux.home.tip_first_patient"), t("ux.mascot.name"))
+    elif without_consent:
+        ui.guide("think", t("ux.home.tip_consent", count=len(without_consent)), t("ux.mascot.name"))
+    elif summary.sessions_week == 0:
+        ui.guide("calm", t("ux.home.tip_new_session"), t("ux.mascot.name"))
+    else:
+        ui.guide("cheer", t("ux.home.tip_good_week"), t("ux.mascot.name"))
+
+    st.subheader(t("ux.home.monitor"))
+    render_room_monitor(service, {p.id: p for p in patients})
+
+
+@st.fragment(run_every=3)
+def render_room_monitor(service: SpectraService, patients: dict) -> None:
+    from spectra.browser.live import live_status
+
+    rooms = Rooms(service).overview()
+    if not rooms:
+        ui.guide("sleep", t("ux.home.no_rooms"))
+        return
+    for room in rooms:
+        patient = patients.get(room.patient_id)
+        with st.container(border=True):
+            left, right = st.columns([3, 2])
+            left.markdown(f"**{_patient_label(patient) if patient else '—'}**")
+            left.caption(
+                t(
+                    "ux.home.room_created",
+                    time=dt.datetime.fromtimestamp(room.created_at).strftime("%d/%m %H:%M"),
+                )
+            )
+            right.html(art.chip_html(t(f"ux.room.{room.status}"), ROOM_TONES[room.status]))
+            status = live_status(room.session_id) if room.status == "active" else None
+            if status is not None and status.frames:
+                right.caption(
+                    t(
+                        "ux.home.live",
+                        exercise=t(f"physio.exercise.{status.exercise}"),
+                        reps=status.reps,
+                        total=status.total_reps,
+                        hand=t(
+                            "ux.home.hand_ok" if status.hand_visible else "ux.home.hand_missing"
+                        ),
+                    )
+                )
+                right.progress(status.time_fraction)
+
+
 # -------------------------------------------------------------------- patients
 def render_patients(service: SpectraService) -> None:
     st.header(t("panel.section.patients"))
@@ -108,7 +194,7 @@ def render_patients(service: SpectraService) -> None:
             use_container_width=True,
         )
     else:
-        st.info(t("panel.patients.empty"))
+        ui.guide("sleep", t("ux.empty.patients"))
 
     with st.expander(t("panel.patients.new"), expanded=not patients):
         with st.form("new_patient"):
@@ -164,7 +250,7 @@ def render_consent(service: SpectraService) -> None:
     st.header(t("panel.section.consent"))
     patients = service.db.list_patients()
     if not patients:
-        st.info(t("panel.patients.empty"))
+        ui.guide("sleep", t("ux.empty.patients"))
         return
 
     patient = st.selectbox(t("report.field.patient"), patients, format_func=_patient_label)
@@ -196,7 +282,7 @@ def render_session(service: SpectraService) -> None:
     st.header(t("panel.section.session"))
     patients = service.db.list_patients()
     if not patients:
-        st.info(t("panel.patients.empty"))
+        ui.guide("sleep", t("ux.empty.patients"))
         return
 
     patient = st.selectbox(t("report.field.patient"), patients, format_func=_patient_label)
@@ -285,10 +371,11 @@ def render_session(service: SpectraService) -> None:
         and st.session_state.get("browser_room_patient") == patient.id
     ):
         code = st.session_state["browser_room_code"]
-        st.success(t("browser.created"))
+        ui.guide("cheer", t("browser.created"), t("ux.mascot.name"))
         st.code(code, language=None)
         st.link_button(t("browser.open_patient"), f"?paciente=1&sala={code}", type="primary")
         st.caption(t("browser.code_hint"))
+        st.caption(t("ux.home.monitor_hint"))
 
 
 # --------------------------------------------------------------------- history
@@ -296,14 +383,17 @@ def render_history(service: SpectraService) -> None:
     st.header(t("panel.section.history"))
     patients = service.db.list_patients()
     if not patients:
-        st.info(t("panel.patients.empty"))
+        ui.guide("sleep", t("ux.empty.patients"))
         return
 
     patient = st.selectbox(t("report.field.patient"), patients, format_func=_patient_label)
     sessions = service.db.list_sessions(patient.id)
     if not sessions:
-        st.info(t("panel.history.empty"))
+        ui.guide("sleep", t("ux.empty.history"))
         return
+
+    def pain(value: int | None) -> str:
+        return "—" if value is None else str(value)
 
     st.dataframe(
         [
@@ -314,11 +404,22 @@ def render_history(service: SpectraService) -> None:
                 t("report.field.duration"): f"{s.duration / 60:.0f} min",
                 t("report.field.hand"): s.hand.value,
                 t("panel.field.quality"): "✔" if s.tracking_quality.get("reliable") else "⚠",
+                t("ux.history.pain_before"): pain(s.pain_before),
+                t("ux.history.pain_after"): pain(s.pain_after),
             }
             for s in sessions
         ],
         use_container_width=True,
     )
+    pain_rows = pain_series(sessions)
+    if pain_rows:
+        import pandas as pd
+
+        st.subheader(t("ux.history.pain_chart"))
+        before, after = t("ux.history.pain_before"), t("ux.history.pain_after")
+        frame = pd.DataFrame(pain_rows).rename(columns={"before": before, "after": after})
+        st.line_chart(frame, x="date", y=[before, after])
+        st.caption(t("ux.history.pain_chart_hint"))
 
     session = st.selectbox(
         t("panel.history.session"),
@@ -428,8 +529,10 @@ def render_privacy(service: SpectraService) -> None:
 
 # ------------------------------------------------------------------------ main
 def main() -> None:
-    st.set_page_config(page_title=PAGE_TITLE, page_icon="🖐", layout="wide")
+    st.set_page_config(page_title=PAGE_TITLE, page_icon="👻", layout="wide")
     service = get_service()
+    ui.apply_theme()
+    ui.splash_once()
 
     if st.query_params.get("paciente") == "1" or "sala" in st.query_params:
         from spectra.browser.page import render_patient
@@ -442,20 +545,29 @@ def main() -> None:
         return
 
     with st.sidebar:
-        st.title(PAGE_TITLE)
+        st.html(
+            '<div class="sp-guide">'
+            f'<div class="sp-float">{art.ghost_img("calm", 54)}</div>'
+            f'<div><div class="sp-hero-title" style="font-size:1.6rem">{PAGE_TITLE}</div>'
+            "</div></div>"
+        )
         st.caption(st.session_state.get("therapist_name", ""))
-        st.toggle(t("panel.demo_mode"), key="demo_mode", help=t("panel.demo_mode_help"))
         section = st.radio(
             t("panel.navigation"),
-            ("patients", "consent", "session", "history", "privacy"),
-            format_func=lambda key: t(f"panel.section.{key}"),
+            SECTIONS,
+            format_func=lambda key: t(f"ux.nav.{key}"),
         )
-        if st.button(t("panel.logout")):
+        st.divider()
+        st.toggle(t("panel.demo_mode"), key="demo_mode", help=t("panel.demo_mode_help"))
+        with st.expander(t("ux.a11y.title")):
+            ui.accessibility_controls()
+        if st.button(t("panel.logout"), use_container_width=True):
             st.session_state.clear()
             st.rerun()
         st.caption(t("panel.data_dir", path=str(service.config.data_dir)))
 
     {
+        "home": render_home,
         "patients": render_patients,
         "consent": render_consent,
         "session": render_session,

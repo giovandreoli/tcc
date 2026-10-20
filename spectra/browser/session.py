@@ -11,6 +11,7 @@ import cv2
 import numpy as np
 
 from spectra.app import SpectraApp
+from spectra.browser import live
 from spectra.browser.rooms import RoomAdmission, Rooms
 from spectra.config import AppConfig
 from spectra.detection.hand_detector import HandDetector
@@ -38,8 +39,14 @@ class BrowserSession:
         self.finished = False
         self.saved = False
         self.error_key: str | None = None
+        self.pain_before: int | None = None
         self._reps = 0
+        self._target = 0
+        self._total_reps = 0
+        self._exercise_index = 0
+        self._hand_visible = False
         self._exercise = admission.exercises[0]
+        live.register(admission.session.id, self)
 
     def _start(self, frame: np.ndarray) -> None:
         self._detector = HandDetector(
@@ -84,10 +91,15 @@ class BrowserSession:
                 if app is None or detector is None:
                     raise RuntimeError("browser session initialization failed")
                 mirrored = cv2.flip(frame, 1)
-                output, action = app.render_frame(mirrored, detector.detect(mirrored))
+                detection = detector.detect(mirrored)
+                self._hand_visible = bool(detection.hands)
+                output, action = app.render_frame(mirrored, detection)
                 mode = app.modes[AppMode.PHYSIO]
                 if isinstance(mode, PhysioMode):
                     self._reps = mode.progress.reps
+                    self._target = mode.progress.target
+                    self._exercise_index = mode.exercise_index
+                    self._total_reps = mode.progress.reps + sum(r.reps for r in mode.history)
                     self._exercise = mode.current_exercise.value
                 if action in (ACTION_MENU, ACTION_QUIT) or app.guard.expired:
                     self.finish()
@@ -112,7 +124,7 @@ class BrowserSession:
                         mode = self._app.modes[AppMode.PHYSIO]
                         if isinstance(mode, PhysioMode):
                             mode.progress.close()
-                        self._app.finish_session()
+                        self._app.finish_session(pain_before=self.pain_before)
                         rooms.complete(self.admission)
                     self.saved = True
                 else:
@@ -135,3 +147,22 @@ class BrowserSession:
         with self._lock:
             frames = self._app.recorder.frames_total if self._app is not None else 0
             return self.finished, self.saved, self.error_key, self._exercise, self._reps, frames
+
+    def status(self) -> live.LiveStatus:
+        with self._lock:
+            app = self._app
+            return live.LiveStatus(
+                finished=self.finished,
+                saved=self.saved,
+                error_key=self.error_key,
+                exercise=self._exercise,
+                reps=self._reps,
+                target=self._target,
+                total_reps=self._total_reps,
+                frames=app.recorder.frames_total if app is not None else 0,
+                hand_visible=self._hand_visible,
+                elapsed_seconds=app.guard.elapsed() if app is not None else 0.0,
+                limit_seconds=self.admission.duration_minutes * 60.0,
+                exercise_index=self._exercise_index,
+                exercise_total=len(self.admission.exercises),
+            )

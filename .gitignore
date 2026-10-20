@@ -5,6 +5,7 @@ __pycache__/
 
 # Virtual environments
 .venv/
+.venv*/
 venv/
 env/
 
@@ -37,6 +38,8 @@ Thumbs.db
 # Patient data, database and generated artifacts (LGPD: never commit)
 data/
 Spectra/
+# Keep the source package visible on case-insensitive Windows filesystems.
+!/spectra/
 *.db
 *.sqlite
 *.sqlite3

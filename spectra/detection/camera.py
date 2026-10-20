@@ -1,4 +1,4 @@
-"""Webcam capture, isolating the Windows-specific DirectShow backend."""
+"""Webcam capture with fallback across Windows capture backends."""
 
 from __future__ import annotations
 
@@ -19,14 +19,38 @@ class Camera:
         fps: int = 30,
         mirror: bool = True,
     ) -> None:
-        backend = cv2.CAP_DSHOW if is_windows() else cv2.CAP_ANY
-        self._capture = cv2.VideoCapture(index, backend)
         self.mirror = mirror
-        if not self._capture.isOpened():
-            raise RuntimeError(f"could not open camera {index}")
+        self._capture = self._open_capture(index)
         self._capture.set(cv2.CAP_PROP_FRAME_WIDTH, width)
         self._capture.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
         self._capture.set(cv2.CAP_PROP_FPS, fps)
+
+    @staticmethod
+    def _open_capture(index: int) -> cv2.VideoCapture:
+        """Try Windows capture backends in order before reporting an open failure."""
+        backends = (
+            (
+                (cv2.CAP_DSHOW, "DirectShow"),
+                (cv2.CAP_MSMF, "Media Foundation"),
+                (cv2.CAP_ANY, "automatic"),
+            )
+            if is_windows()
+            else ((cv2.CAP_ANY, "automatic"),)
+        )
+        errors = []
+        for backend, name in backends:
+            try:
+                capture = cv2.VideoCapture(index, backend)
+            except cv2.error as exc:
+                errors.append(f"{name}: {exc}")
+                continue
+            if capture.isOpened():
+                return capture
+            capture.release()
+            errors.append(f"{name}: device did not open")
+
+        details = "; ".join(errors)
+        raise RuntimeError(f"could not open camera {index}; tried {details}")
 
     def read(self) -> np.ndarray | None:
         ok, frame = self._capture.read()

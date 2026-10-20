@@ -43,6 +43,25 @@ did not, was not added.
 
 ## 2. Consent (TCLE) — enforced, not documented
 
+### Local browser sessions
+
+The browser patient page requires a random room code and the existing patient PIN.
+Only the SHA-256 digest of the random 12-character code is stored, with a one-hour entry
+deadline; the code contains no patient identifier. Failed PIN attempts use the existing
+account lockout and audit trail. An exclusive claim prevents two active browser connections,
+and consent is checked again on entry and periodically during processing.
+
+The first browser implementation is **local only**. WebRTC transports camera frames from the
+browser to the Python process on the same computer for inference; frames stay in memory.
+Audio capture is disabled and no external ICE servers are configured. The Windows panel
+launcher binds to localhost and disables Streamlit usage statistics. Do not expose this
+prototype directly to the internet. Closing the page normally finalizes the session, but
+a process crash may lose unsaved in-memory metrics.
+
+Remote browser-side inference and video calls require a separate deployment, authentication,
+networking and privacy review, and updated participant information before use. They are not
+provided by this local extension.
+
 A consent record is **required before any session can be created**. This is a database
 invariant, not a convention:
 

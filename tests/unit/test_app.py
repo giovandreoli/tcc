@@ -64,6 +64,10 @@ class TestArgumentParsing:
         assert info.value.code == 0
 
     def test_a_missing_camera_returns_a_failure_code(self, tmp_path, monkeypatch):
+        def unavailable_camera(*args, **kwargs):
+            raise RuntimeError("camera unavailable in test")
+
+        monkeypatch.setattr("spectra.app.Camera", unavailable_camera)
         monkeypatch.setenv("SPECTRA_DATA_DIR", str(tmp_path / "Spectra"))
         assert main(["--camera", "99"]) == 1
 

@@ -156,7 +156,7 @@ class SpectraApp:
             self._service = None
 
     # ------------------------------------------------------------------ setup
-    def build_modes(self, width: int, height: int) -> None:
+    def build_modes(self, width: int, height: int, *, require_pin: bool = True) -> None:
         profile_name = self._session.gesture_profile_name if self._session else "standard"
         calibration = (
             self._service.calibration_for(self._session.patient_id)
@@ -176,8 +176,13 @@ class SpectraApp:
         )
         self.modes = {mode: factory(context) for mode, factory in MODE_FACTORIES.items()}
         self._context = context
-        if self.attached:
+        if self.attached and require_pin:
             self._pin_mode = PinEntryMode(context, verify=self.verify_pin)
+
+    def close_storage(self) -> None:
+        """Close this thread's database connection without discarding the session."""
+        if self._service is not None:
+            self._service.close()
 
     def switch_to(self, mode: AppMode) -> None:
         self.mode = mode
@@ -240,7 +245,6 @@ class SpectraApp:
 
     # ------------------------------------------------------------------- loop
     def run(self) -> None:
-        self.attach_session()
         try:
             camera = Camera(
                 self.config.camera_index,
@@ -249,12 +253,13 @@ class SpectraApp:
                 self.config.capture_fps,
             )
         except RuntimeError as exc:
-            raise RuntimeError(t("app.camera_error")) from exc
+            raise RuntimeError(f"{t('app.camera_error')} {exc}") from exc
 
         with camera:
             first = camera.read()
             if first is None:
                 raise RuntimeError(t("app.frame_error"))
+            self.attach_session()
             height, width = first.shape[:2]
             self.build_modes(width, height)
             if not self.attached:

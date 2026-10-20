@@ -14,6 +14,7 @@ import datetime as dt
 
 import streamlit as st
 
+from spectra.browser.rooms import EXERCISES, RoomError, Rooms
 from spectra.config import load_config
 from spectra.gestures.profiles import PRESETS
 from spectra.guided.shapes import SHAPE_ORDER, Difficulty
@@ -199,6 +200,17 @@ def render_session(service: SpectraService) -> None:
         return
 
     patient = st.selectbox(t("report.field.patient"), patients, format_func=_patient_label)
+    browser_mode = (
+        st.radio(
+            t("browser.delivery"),
+            ("browser", "desktop"),
+            format_func=lambda value: t(f"browser.delivery_{value}"),
+            horizontal=True,
+        )
+        == "browser"
+    )
+    if browser_mode:
+        st.info(t("browser.local_only"))
     columns = st.columns(3)
     plan = SessionPlan(
         patient_id=patient.id,
@@ -224,8 +236,9 @@ def render_session(service: SpectraService) -> None:
         exercises=tuple(
             st.multiselect(
                 t("panel.field.exercises"),
-                ["open_close", "finger_touch", "finger_wave", *SHAPE_ORDER],
+                list(EXERCISES) if browser_mode else [*EXERCISES, *SHAPE_ORDER],
                 default=["open_close", "finger_touch", "finger_wave"],
+                key=f"exercises_{browser_mode}",
             )
         ),
         demo_mode=_demo_mode(),
@@ -250,12 +263,32 @@ def render_session(service: SpectraService) -> None:
 
     if st.button(t("panel.session.start"), type="primary"):
         try:
-            session = service.start_session(plan)
+            if browser_mode:
+                code = Rooms(service).create(plan)
+                st.session_state["browser_room_code"] = code
+                st.session_state["browser_room_patient"] = patient.id
+            else:
+                session = service.start_session(plan)
+                st.session_state["active_session"] = session.id
+                st.success(
+                    t("panel.session.started", command=f"python -m spectra --session {session.id}")
+                )
         except ConsentRequiredError:
             st.error(t("panel.session.consent_required"))
             return
-        st.session_state["active_session"] = session.id
-        st.success(t("panel.session.started", command=f"python -m spectra --session {session.id}"))
+        except RoomError as exc:
+            st.error(t(str(exc)))
+            return
+    if (
+        browser_mode
+        and st.session_state.get("browser_room_code")
+        and st.session_state.get("browser_room_patient") == patient.id
+    ):
+        code = st.session_state["browser_room_code"]
+        st.success(t("browser.created"))
+        st.code(code, language=None)
+        st.link_button(t("browser.open_patient"), f"?paciente=1&sala={code}", type="primary")
+        st.caption(t("browser.code_hint"))
 
 
 # --------------------------------------------------------------------- history
@@ -397,6 +430,12 @@ def render_privacy(service: SpectraService) -> None:
 def main() -> None:
     st.set_page_config(page_title=PAGE_TITLE, page_icon="🖐", layout="wide")
     service = get_service()
+
+    if st.query_params.get("paciente") == "1" or "sala" in st.query_params:
+        from spectra.browser.page import render_patient
+
+        render_patient(service)
+        return
 
     if not _therapist_id():
         render_login(service)

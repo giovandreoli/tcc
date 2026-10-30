@@ -48,7 +48,7 @@ def exercises_chart(report: SessionReport) -> bytes | None:
     if not report.exercises:
         return None
     figure, axes = _figure("report.chart.exercises_title")
-    labels = [_ascii(t("physio.exercise." + run.name)) for run in report.exercises]
+    labels = [_ascii(run.label()) for run in report.exercises]
     positions = list(range(len(labels)))
     axes.bar(
         [x - 0.2 for x in positions],

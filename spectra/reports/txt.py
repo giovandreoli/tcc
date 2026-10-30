@@ -45,8 +45,7 @@ def sections(report: SessionReport, catalog: Catalog | None = None) -> list[tupl
     ]
     exercises = []
     for exercise in report.exercises:
-        key = "physio.exercise." + exercise.name
-        name = t(key) if key in c else t("report.exercise.guided")
+        name = exercise.label(c)
         exercises.append(
             f"{name}: {t('report.field.reps')} {exercise.reps}/{exercise.target}; "
             f"{t('report.field.duration')} {exercise.duration_seconds:.0f} s; "

@@ -205,6 +205,16 @@ class Cipher:
     def cpf_hash(self, cpf: str) -> str:
         return cpf_lookup_hash(cpf, self.lookup_key)
 
+    def encrypt_bytes(self, data: bytes) -> bytes:
+        """Encrypt a whole file (an attached clinical document)."""
+        return self._fernet.encrypt(data)
+
+    def decrypt_bytes(self, token: bytes) -> bytes:
+        try:
+            return self._fernet.decrypt(token)
+        except InvalidToken as exc:
+            raise SecurityError("could not decrypt a stored file") from exc
+
 
 # ----------------------------------------------------------------------- KDF
 def hash_secret(secret: str) -> str:

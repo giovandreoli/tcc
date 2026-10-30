@@ -38,13 +38,14 @@ did not, was not added.
 - No audio.
 - No biometric template. MediaPipe landmarks are geometric measurements of a hand pose at
   one instant and are not used, nor usable, for identification.
-- No location data, no device identifiers, no analytics, no network telemetry. The
-  application makes exactly one outbound request in its lifetime: downloading the
-  MediaPipe model, if it is missing.
+- No location data, no device identifiers, no analytics, no network telemetry. Outbound
+  requests happen only when needed and on the therapist's action: downloading the MediaPipe
+  model if it is missing, downloading the official `cloudflared` client, and the tunnel
+  itself while internet access is enabled.
 
 ## 2. Consent (TCLE) — enforced, not documented
 
-### Local browser sessions
+### Browser sessions (same computer or from home)
 
 The browser patient page requires a random room code and the existing patient PIN.
 Only the SHA-256 digest of the random 12-character code is stored, with a one-hour entry
@@ -52,22 +53,45 @@ deadline; the code contains no patient identifier. Failed PIN attempts use the e
 account lockout and audit trail. An exclusive claim prevents two active browser connections,
 and consent is checked again on entry and periodically during processing.
 
-The first browser implementation is **local only**. WebRTC transports camera frames from the
-browser to the Python process on the same computer for inference; frames stay in memory.
-The camera preview is local to the browser (SENDONLY); no processed video returns from Python.
-It is mirrored visually only, without changing the image used for anatomical hand selection.
-Audio capture is disabled and no external ICE servers are configured. The Windows panel
-launcher binds to localhost and disables Streamlit usage statistics. Do not expose this
-prototype directly to the internet. Closing the page normally finalizes the session, but
-a process crash may lose unsaved in-memory metrics.
+**Video never leaves the patient's computer.** Hand tracking (MediaPipe) runs inside the
+patient's browser, from files served by the panel itself (no CDN, no third-party script). Only
+21 normalised hand points per analysed frame are sent to the panel; they are geometric
+measurements, not images, and are reduced to the same derived numbers as before. The preview is
+mirrored visually only; audio is never requested. Landmark batches are validated as untrusted
+input before use.
 
-The therapist's live room monitor reads only in-memory counters from the same local process
-(current exercise, repetitions, whether a hand is visible, time progress). No frame, image or
-landmark is shared with the panel, and nothing extra is persisted.
+**Internet access is optional and free** (Cloudflare quick tunnel, `*.trycloudflare.com`).
+When enabled by the therapist:
 
-Remote browser-side inference and video calls require a separate deployment, authentication,
-networking and privacy review, and updated participant information before use. They are not
-provided by this local extension.
+- the connection between the patient and Cloudflare is HTTPS, and Cloudflare relays it to the
+  therapist's computer through the outbound `cloudflared` connection; Cloudflare therefore acts
+  as a transit operator for the landmark batches, the room code and the PIN entry (TLS
+  terminates at Cloudflare's edge). No video, name, CPF or record ever transits;
+- requests that arrive through the tunnel **only receive the patient page**. The therapist
+  panel, patient list, documents and reports answer exclusively to requests made on the
+  therapist's own computer, even if a logged-in panel session were copied;
+- the panel itself still listens only on `localhost`; the tunnel stops when the therapist
+  disables it or closes the panel.
+
+Before using remote sessions with real participants, state in the TCLE that the session can be
+done from home through a third-party relay that carries hand-point measurements only, and
+confirm with the advisor whether the ethics protocol must mention it.
+
+Closing the page normally finalizes the session, but a crash of the panel may lose unsaved
+in-memory metrics.
+
+The therapist's live room monitor reads only in-memory counters (current exercise,
+repetitions, whether a hand is visible, time progress). No frame, image or landmark is shown
+in the panel, and nothing extra is persisted.
+
+### Clinical documents (laudos)
+
+Each patient record can hold written reports and attached files (PDF, PNG, JPEG, up to
+10 MB). Titles, text and original filenames are encrypted columns; files are encrypted with
+the same key and stored as `documents/<uuid>.bin`, so the filename never reveals the patient.
+A SHA-256 of the content detects tampering. Opening, downloading and deleting a document is
+audited. Documents are part of the encrypted backup and of the LGPD export, and are erased on
+anonymisation and on deletion, because a clinical document identifies the person.
 
 A consent record is **required before any session can be created**. This is a database
 invariant, not a convention:

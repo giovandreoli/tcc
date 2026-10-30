@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 import streamlit as st
 
 from spectra.i18n import t
@@ -10,6 +12,12 @@ from spectra.webui import art
 LARGE_TEXT_KEY = "sp_large_text"
 HIGH_CONTRAST_KEY = "sp_high_contrast"
 SPLASH_KEY = "sp_splash_shown"
+_MARKDOWN_SPECIAL = re.compile(r"([\\`*_{}\[\]()#+\-.!|>~<])")
+
+
+def escape_markdown(text: str) -> str:
+    """Render user text literally: names, masked CPFs (``***``) and therapist-written text."""
+    return _MARKDOWN_SPECIAL.sub(r"\\\1", text)
 
 
 def apply_theme() -> None:

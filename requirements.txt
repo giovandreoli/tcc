@@ -24,4 +24,5 @@ streamlit==1.50.0
 pandas==2.3.3
 # Newer PyArrow wheels require NumPy 2, incompatible with MediaPipe 0.10.21.
 pyarrow==19.0.1
-streamlit-webrtc==0.63.11
+# Browser sessions need no extra package: hand tracking runs in the patient's browser
+# with the MediaPipe Tasks Vision files bundled in spectra/browser/camera/vendor.

@@ -1,5 +1,7 @@
 site_name: SPECTRA
 site_description: Plataforma de reabilitação de mão, dedos e punho controlada por gestos
+site_url: https://giovandreoli.github.io/tcc/
+repo_url: https://github.com/giovandreoli/tcc
 docs_dir: docs
 use_directory_urls: false
 
@@ -15,10 +17,11 @@ theme:
     - content.code.copy
 
 nav:
-  - Visão geral: ../README.md
+  - Visão geral: index.md
   - Arquitetura: architecture.md
   - Gestos: gestures.md
   - Métricas: metrics.md
+  - Aprendizado e avaliação: learning.md
   - LGPD e ética: lgpd.md
   - Decisões: decisions.md
 

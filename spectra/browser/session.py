@@ -1,4 +1,10 @@
-"""Thread-safe adapter from browser video frames to the existing exercise engine."""
+"""Browser sessions driven by landmarks analysed on the patient's own computer.
+
+The browser runs MediaPipe locally and sends batches of hand landmarks, so the patient's
+video never leaves their computer. This module turns those batches into repetitions,
+metrics and safety prompts with the same exercise engine, recorder and report pipeline
+as the desktop application.
+"""
 
 from __future__ import annotations
 
@@ -7,184 +13,240 @@ import threading
 import time
 from dataclasses import replace
 
-import numpy as np
-
-from spectra.app import SpectraApp
 from spectra.browser import live
+from spectra.browser.frames import BrowserFrame
 from spectra.browser.rooms import RoomAdmission, Rooms
 from spectra.config import AppConfig
-from spectra.core.session_guard import SafetyPrompt
-from spectra.detection.hand_detector import HandDetector
+from spectra.core.session_guard import SafetyPrompt, SessionGuard
+from spectra.exercises.catalog import ExerciseSpec, finger_word
+from spectra.exercises.runner import ExerciseRunner
+from spectra.gestures.calibration import CalibrationProfile
 from spectra.i18n import t
-from spectra.modes.base import ACTION_MENU, ACTION_QUIT, AppMode
-from spectra.modes.physio import ExerciseProgress, PhysioExercise, PhysioMode
 from spectra.service import SpectraService
-from spectra.ui.text import draw_text_centered
 
 logger = logging.getLogger(__name__)
 
+HEARTBEAT_SECONDS = 5.0
+SAFETY_PROMPT_SECONDS = 8.0
+#: Frames this far in the future (clock skew) are pulled back to "now".
+MAX_FUTURE_SECONDS = 0.0
 
-class BrowserSession:
-    """A single admitted browser, with no OpenCV windows or hardware capture."""
 
-    def __init__(self, config: AppConfig, admission: RoomAdmission) -> None:
-        self.config = replace(
-            config, sound_enabled=False, session_limit_minutes=admission.duration_minutes
-        )
-        self.admission = admission
+class LandmarkSession:
+    """Exercise counting over browser landmark batches, without any persistence.
+
+    Used directly for the therapist's "try this exercise" preview, and as the base of
+    :class:`BrowserSession`, which adds the room, the database and the safety limits.
+    """
+
+    def __init__(
+        self,
+        specs: tuple[ExerciseSpec, ...],
+        hand_label: str | None = None,
+        calibration: CalibrationProfile | None = None,
+    ) -> None:
+        if not specs:
+            raise ValueError("at least one exercise is required")
+        self.specs = specs
+        self.hand_label = hand_label
+        self.calibration = calibration
         self._lock = threading.RLock()
-        self._app: SpectraApp | None = None
-        self._detector: HandDetector | None = None
-        self._last_heartbeat = 0.0
+        self._runner: ExerciseRunner | None = None
+        self._offset: float | None = None
+        self._last_at = 0.0
         self.finished = False
         self.saved = False
         self.error_key: str | None = None
-        self.pain_before: int | None = None
-        self._reps = 0
-        self._target = 0
-        self._total_reps = 0
-        self._exercise_index = 0
-        self._hand_visible = False
-        self._safety_key: str | None = None
-        self._safety_until = 0.0
-        self._exercise = admission.exercises[0]
-        live.register(admission.session.id, self)
+        self.started_wall: float | None = None
 
-    def _start(self, frame: np.ndarray) -> None:
-        self._detector = HandDetector(
-            self.config.model_path(),
-            detection_size=(self.config.detection_width, self.config.detection_height),
-            num_hands=1,
-            video_mode=True,
-        )
-        with SpectraService.open(self.config) as service, service.db.transaction() as connection:
-            connection.execute(
-                "UPDATE session SET started_at = ? WHERE id = ? AND ended_at IS NULL",
-                (time.time(), self.admission.session.id),
-            )
-        app = SpectraApp(self.config, session_id=self.admission.session.id)
-        self._app = app
-        app.attach_session()
-        height, width = frame.shape[:2]
-        app.build_modes(width, height, require_pin=False, camera_overlay=False)
-        mode = app.modes[AppMode.PHYSIO]
-        if not isinstance(mode, PhysioMode):
-            raise RuntimeError("physiotherapy mode is unavailable")
-        mode.EXERCISES = tuple(PhysioExercise(name) for name in self.admission.exercises)
-        mode.progress = ExerciseProgress(mode.current_exercise)
-        app.switch_to(AppMode.PHYSIO)
-        app.guard.start()
+    # ------------------------------------------------------------- timing
+    def _timestamp(self, at_ms: float) -> float:
+        """Map the browser clock onto wall time, monotonic and never in the future."""
+        now = time.time()
+        if self._offset is None:
+            self._offset = now - at_ms / 1000.0
+        moment = min(self._offset + at_ms / 1000.0, now + MAX_FUTURE_SECONDS)
+        moment = max(moment, self._last_at + 0.001)
+        self._last_at = moment
+        return moment
 
-    def process(self, frame: np.ndarray) -> np.ndarray:
+    # --------------------------------------------------------- processing
+    def _on_start(self, at: float) -> None:
+        """Hook for subclasses: the first frame arrived."""
+
+    def _after_batch(self) -> None:
+        """Hook for subclasses: called after every processed batch."""
+
+    def process_batch(self, frames: list[BrowserFrame]) -> None:
         with self._lock:
-            if self.finished:
-                output = np.zeros_like(frame)
-                draw_text_centered(
-                    output, t("browser.ended"), output.shape[1] // 2, output.shape[0] // 2
-                )
-                return output
+            if self.finished or not frames:
+                return
             try:
-                now = time.monotonic()
-                if now - self._last_heartbeat >= 5:
-                    with SpectraService.open(self.config) as service:
-                        Rooms(service).heartbeat(self.admission)
-                    self._last_heartbeat = now
-                if self._app is None:
-                    self._start(frame)
-                app, detector = self._app, self._detector
-                if app is None or detector is None:
-                    raise RuntimeError("browser session initialization failed")
-                # Analyze camera pixels, not the mirrored browser preview.
-                detection = detector.detect(frame)
-                self._hand_visible = detection.for_label(app.hand_label) is not None
-                mode = app.modes[AppMode.PHYSIO]
-                output, action = mode.process(frame, detection)
-                if isinstance(mode, PhysioMode):
-                    self._sync_progress(mode)
-                prompt = app.guard.check()
-                if prompt is not SafetyPrompt.NONE:
-                    self._safety_key = f"safety.{prompt.value}"
-                    self._safety_until = time.monotonic() + 8
-                if action in (ACTION_MENU, ACTION_QUIT) or app.guard.expired:
-                    self.finish()
-                return output
+                self._before_batch()
+                if self._offset is None:
+                    # Anchor on the newest frame so the first batch keeps its real spacing.
+                    self._offset = time.time() - max(f.at_ms for f in frames) / 1000.0
+                for frame in frames:
+                    at = self._timestamp(frame.at_ms)
+                    if self._runner is None:
+                        self.started_wall = time.time()
+                        self._runner = ExerciseRunner(self.specs, self.calibration, started_at=at)
+                        self._on_start(at)
+                    hand = frame.hand
+                    if hand is not None and self.hand_label and hand.label != self.hand_label:
+                        hand = None
+                    self._runner.feed(
+                        hand.landmarks if hand else None, hand.score if hand else 0.0, at
+                    )
+                self._after_batch()
             except Exception:
                 self.error_key = "browser.processing_error"
                 logger.exception("browser exercise processing failed")
                 raise
-            finally:
-                if self._app is not None:
-                    self._app.close_storage()
 
-    def _sync_progress(self, mode: PhysioMode) -> None:
-        self._reps = mode.progress.reps
-        self._target = mode.progress.target
-        self._exercise_index = mode.exercise_index
-        self._total_reps = mode.progress.reps + sum(r.reps for r in mode.history)
-        self._exercise = mode.current_exercise.value
+    def _before_batch(self) -> None:
+        """Hook for subclasses: called before every batch is processed."""
 
     def next_exercise(self) -> None:
         with self._lock:
-            if self.finished or self.error_key or self._app is None:
+            if self.finished or self.error_key or self._runner is None:
                 raise RuntimeError("cannot advance an inactive browser session")
-            mode = self._app.modes[AppMode.PHYSIO]
-            if not isinstance(mode, PhysioMode):
-                raise RuntimeError("physiotherapy mode is unavailable")
-            mode.next_exercise()
-            self._sync_progress(mode)
+            self._runner.next_exercise()
+
+    def finish(self) -> None:
+        with self._lock:
+            self.finished = True
+
+    # -------------------------------------------------------------- status
+    @property
+    def runner(self) -> ExerciseRunner | None:
+        return self._runner
+
+    def _elapsed(self) -> float:
+        return time.time() - self.started_wall if self.started_wall else 0.0
+
+    def _limit_seconds(self) -> float:
+        return 0.0
+
+    def _safety_key(self) -> str | None:
+        return None
+
+    def status(self) -> live.LiveStatus:
+        with self._lock:
+            runner = self._runner
+            spec = runner.current if runner else self.specs[0]
+            cue = runner.cue() if runner else None
+            return live.LiveStatus(
+                finished=self.finished,
+                saved=self.saved,
+                error_key=self.error_key,
+                exercise=spec.key,
+                reps=runner.progress.reps if runner else 0,
+                target=spec.target_reps,
+                total_reps=runner.total_reps if runner else 0,
+                frames=runner.recorder.frames_total if runner else 0,
+                hand_visible=runner.hand_visible if runner else False,
+                elapsed_seconds=self._elapsed(),
+                limit_seconds=self._limit_seconds(),
+                exercise_index=runner.index if runner else 0,
+                exercise_total=len(self.specs),
+                safety_key=self._safety_key(),
+                exercise_title=spec.display_title(),
+                cue=(
+                    t(cue.key, finger=finger_word(cue.finger) if cue.finger else "") if cue else ""
+                ),
+                hold_fraction=runner.hold_fraction() if runner else 0.0,
+                instructions=tuple(spec.display_instructions()),
+            )
+
+
+class BrowserSession(LandmarkSession):
+    """A single admitted browser: room lease, persistence and safety limits."""
+
+    def __init__(
+        self,
+        config: AppConfig,
+        admission: RoomAdmission,
+        calibration: CalibrationProfile | None = None,
+    ) -> None:
+        self.config = replace(
+            config, sound_enabled=False, session_limit_minutes=admission.duration_minutes
+        )
+        self.admission = admission
+        super().__init__(
+            admission.exercises,
+            hand_label=admission.session.hand.value,
+            calibration=calibration,
+        )
+        self.guard = SessionGuard(
+            limit_minutes=admission.duration_minutes,
+            rest_every_minutes=self.config.rest_prompt_minutes,
+        )
+        self._last_heartbeat = 0.0
+        self.pain_before: int | None = None
+        self._safety: str | None = None
+        self._safety_until = 0.0
+        live.register(admission.session.id, self)
+
+    def _before_batch(self) -> None:
+        now = time.monotonic()
+        if now - self._last_heartbeat >= HEARTBEAT_SECONDS:
+            with SpectraService.open(self.config) as service:
+                Rooms(service).heartbeat(self.admission)
+            self._last_heartbeat = now
+
+    def _on_start(self, at: float) -> None:
+        with SpectraService.open(self.config) as service, service.db.transaction() as connection:
+            connection.execute(
+                "UPDATE session SET started_at = ? WHERE id = ? AND ended_at IS NULL",
+                (at, self.admission.session.id),
+            )
+        self.guard.start()
+
+    def _after_batch(self) -> None:
+        prompt = self.guard.check()
+        if prompt is not SafetyPrompt.NONE:
+            self._safety = f"safety.{prompt.value}"
+            self._safety_until = time.monotonic() + SAFETY_PROMPT_SECONDS
+        if self.guard.expired:
+            self.finish()
+
+    def _elapsed(self) -> float:
+        return self.guard.elapsed()
+
+    def _limit_seconds(self) -> float:
+        return self.admission.duration_minutes * 60.0
+
+    def _safety_key(self) -> str | None:
+        return self._safety if time.monotonic() < self._safety_until else None
 
     def finish(self) -> None:
         with self._lock:
             if self.finished:
                 return
             try:
-                if self._app is not None and self._detector is not None:
-                    with SpectraService.open(self.config) as service:
-                        rooms = Rooms(service)
+                with SpectraService.open(self.config) as service:
+                    rooms = Rooms(service)
+                    runner = self._runner
+                    if runner is not None:
                         rooms.heartbeat(self.admission)
-                        mode = self._app.modes[AppMode.PHYSIO]
-                        if isinstance(mode, PhysioMode):
-                            mode.progress.close()
-                        self._app.finish_session(pain_before=self.pain_before)
+                        runner.close()
+                        session = service.db.get_session(self.admission.session.id)
+                        if session is None:
+                            raise RuntimeError("the session disappeared before saving")
+                        service.finish_session(
+                            session,
+                            runner.recorder,
+                            runs=runner.windows(),
+                            pain_before=self.pain_before,
+                        )
                         rooms.complete(self.admission)
-                    self.saved = True
-                else:
-                    with SpectraService.open(self.config) as service:
-                        Rooms(service).release(self.admission)
-                self.finished = True
+                        self.saved = True
+                    else:
+                        rooms.release(self.admission)
             except Exception:
                 self.error_key = "browser.save_error"
                 logger.exception("browser session finalization failed")
                 raise
             finally:
                 self.finished = True
-                if self._detector is not None:
-                    self._detector.close()
-                    self._detector = None
-                if self._app is not None:
-                    self._app.close_storage()
-
-    def snapshot(self) -> tuple[bool, bool, str | None, str, int, int]:
-        with self._lock:
-            frames = self._app.recorder.frames_total if self._app is not None else 0
-            return self.finished, self.saved, self.error_key, self._exercise, self._reps, frames
-
-    def status(self) -> live.LiveStatus:
-        with self._lock:
-            app = self._app
-            return live.LiveStatus(
-                finished=self.finished,
-                saved=self.saved,
-                error_key=self.error_key,
-                exercise=self._exercise,
-                reps=self._reps,
-                target=self._target,
-                total_reps=self._total_reps,
-                frames=app.recorder.frames_total if app is not None else 0,
-                hand_visible=self._hand_visible,
-                elapsed_seconds=app.guard.elapsed() if app is not None else 0.0,
-                limit_seconds=self.admission.duration_minutes * 60.0,
-                exercise_index=self._exercise_index,
-                exercise_total=len(self.admission.exercises),
-                safety_key=(self._safety_key if time.monotonic() < self._safety_until else None),
-            )

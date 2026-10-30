@@ -1,131 +1,113 @@
-"""Local camera preview with a send-only WebRTC analysis connection."""
+"""Camera component: hand tracking in the patient's browser, landmarks to the session.
+
+The component (``camera/``) opens the webcam, shows a mirrored preview and runs the
+MediaPipe hand landmarker **inside the browser**, from files served by this package, with
+no CDN. Only 21 normalised points per analysed frame are sent back, in small batches.
+
+Delivery is acknowledged: the browser keeps every frame newer than the last timestamp the
+server confirmed and resends them with the next batch, so a batch dropped while Streamlit
+is busy is not lost; the server ignores frames it has already processed.
+"""
 
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+import mimetypes
+import shutil
 from pathlib import Path
+from typing import Any
 
-import av
 import streamlit as st
-from aiortc import RTCConfiguration
 from streamlit.components.v1 import declare_component
-from streamlit_webrtc import VideoProcessorBase, WebRtcMode
-from streamlit_webrtc.webrtc import WebRtcWorker
 
-from spectra.browser.session import BrowserSession
+from spectra.browser.frames import BatchError, parse_batch
+from spectra.browser.session import LandmarkSession
+from spectra.config import load_config
 from spectra.i18n import t
 
 logger = logging.getLogger(__name__)
-_component = declare_component("spectra_camera", path=str(Path(__file__).with_name("camera")))
+
+COMPONENT_DIR = Path(__file__).with_name("camera")
+MODEL_NAME = "hand_landmarker.task"
+
+# Windows registries often map .js to text/plain and lack .wasm, which browsers reject.
+mimetypes.add_type("text/javascript", ".js")
+mimetypes.add_type("application/wasm", ".wasm")
 
 
-class ExerciseVideoProcessor(VideoProcessorBase):
-    def __init__(self, session: BrowserSession) -> None:
-        self.session = session
-
-    def recv(self, frame: av.VideoFrame) -> av.VideoFrame:
-        self.session.process(frame.to_ndarray(format="bgr24"))
-        return frame
-
-    def on_ended(self) -> None:
-        self.session.finish()
-
-
-@dataclass
-class CameraConnection:
-    worker: WebRtcWorker
-    offer_id: str
-    answer: dict[str, str]
+def ensure_model() -> Path:
+    """Copy the bundled hand model next to the component so the browser can fetch it."""
+    target = COMPONENT_DIR / MODEL_NAME
+    if not target.is_file():
+        source = load_config().model_path()
+        try:
+            if source.is_file():
+                shutil.copyfile(source, target)
+        except OSError:
+            logger.exception("could not place the hand model next to the camera component")
+    return target
 
 
-def _state_key(session: BrowserSession) -> str:
-    return f"camera_connection_{session.admission.session.id}"
+ensure_model()
+_component = declare_component("spectra_camera", path=str(COMPONENT_DIR))
 
 
-def stop_camera(session: BrowserSession) -> None:
-    connection = st.session_state.pop(_state_key(session), None)
-    if connection is not None:
-        connection.worker.stop()
+def _ack_key(key: str) -> str:
+    return f"{key}_ack_ms"
 
 
-def _create_worker(session: BrowserSession) -> WebRtcWorker:
-    # This adapter targets the pinned streamlit-webrtc 0.63.11 worker API.
-    return WebRtcWorker(
-        mode=WebRtcMode.SENDONLY,
-        rtc_configuration=RTCConfiguration(iceServers=[]),
-        source_video_track=None,
-        source_audio_track=None,
-        player_factory=None,
-        in_recorder_factory=None,
-        out_recorder_factory=None,
-        video_frame_callback=None,
-        audio_frame_callback=None,
-        queued_video_frames_callback=None,
-        queued_audio_frames_callback=None,
-        on_video_ended=None,
-        on_audio_ended=None,
-        video_processor_factory=lambda: ExerciseVideoProcessor(session),
-        audio_processor_factory=None,
-        async_processing=True,
-        video_receiver_size=1,
-        audio_receiver_size=1,
-        sendback_video=False,
-        sendback_audio=False,
-    )
+def camera_labels() -> dict[str, str]:
+    keys = {
+        name: f"browser.camera_{name}"
+        for name in (
+            "start",
+            "stop",
+            "loading",
+            "connected",
+            "denied",
+            "missing",
+            "error",
+            "unsupported",
+            "fps",
+        )
+    }
+    keys["device"] = "browser.select_device"
+    return {name: t(key) for name, key in keys.items()}
 
 
-def camera_streamer(session: BrowserSession) -> None:
-    connection = st.session_state.get(_state_key(session))
+def handle_value(session: LandmarkSession, value: Any, key: str) -> None:
+    """Apply one component value to the session (separated for unit tests)."""
+    if not isinstance(value, dict):
+        return
+    try:
+        frames = parse_batch(value.get("frames") or [])
+    except BatchError:
+        logger.warning("ignored a malformed landmark batch from the browser")
+        frames = []
+    acknowledged = float(st.session_state.get(_ack_key(key), -1.0))
+    fresh = [frame for frame in frames if frame.at_ms > acknowledged]
+    if fresh:
+        session.process_batch(fresh)
+        st.session_state[_ack_key(key)] = fresh[-1].at_ms
+    if value.get("error"):
+        # Only an error category is ever sent: no device names and no images.
+        logger.warning("browser camera reported %s", str(value["error"])[:40])
+        if session.runner is not None:
+            session.finish()
+        return
+    if value.get("playing") is False and session.runner is not None:
+        session.finish()
+
+
+def camera_streamer(session: LandmarkSession, key: str) -> None:
     value = _component(
-        key=f"camera_{session.admission.session.id}",
-        answer=connection.answer if connection is not None else None,
-        labels={
-            "start": t("browser.camera_start"),
-            "stop": t("browser.camera_stop"),
-            "device": t("browser.select_device"),
-            "connecting": t("browser.camera_connecting"),
-            "connected": t("browser.camera_connected"),
-            "denied": t("browser.camera_denied"),
-            "missing": t("browser.camera_missing"),
-            "error": t("browser.processing_error"),
-        },
+        key=key,
+        labels=camera_labels(),
+        ack=st.session_state.get(_ack_key(key), -1.0),
         default=None,
     )
-    if not value:
-        return
-    if value.get("error"):
-        logger.error("local camera connection failed: %s", value["error"])
-        session.error_key = "browser.processing_error"
-        stop_camera(session)
-        session.finish()
-        st.error(t("browser.processing_error"))
-        return
-    if not value.get("playing"):
-        stop_camera(session)
-        session.finish()
-        return
-    offer_id = value.get("id")
-    offer = value.get("offer")
-    if not offer or (connection is not None and connection.offer_id == offer_id):
-        return
-    if connection is not None:
-        raise RuntimeError("a camera connection is already active")
-    worker = _create_worker(session)
-    try:
-        worker.process_offer(offer["sdp"], offer["type"], timeout=15)
-        description = worker.pc.localDescription
-        if description is None:
-            raise RuntimeError("camera negotiation produced no answer")
-        st.session_state[_state_key(session)] = CameraConnection(
-            worker=worker,
-            offer_id=offer_id,
-            answer={"id": offer_id, "sdp": description.sdp, "type": description.type},
-        )
-    except Exception:
-        logger.exception("local camera negotiation failed")
-        session.error_key = "browser.processing_error"
-        worker.stop()
-        session.finish()
-        raise
-    st.rerun()
+    handle_value(session, value, key)
+
+
+def reset_camera(key: str) -> None:
+    st.session_state.pop(_ack_key(key), None)

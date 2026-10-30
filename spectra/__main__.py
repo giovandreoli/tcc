@@ -28,6 +28,18 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="UUID",
         help="attach to a session created in the therapist panel and store its metrics",
     )
+    parser.add_argument(
+        "--usability",
+        default=None,
+        metavar="CODE",
+        help="run the user-test pointing task for an anonymous participant code (e.g. P01)",
+    )
+    parser.add_argument(
+        "--filter",
+        choices=("kalman", "exponential", "raw"),
+        default=None,
+        help="pointer filter (user tests compare kalman and exponential)",
+    )
     parser.add_argument("--no-sound", action="store_true", help="disable audio feedback")
     parser.add_argument("--verbose", action="store_true", help="enable debug logging")
     return parser
@@ -45,11 +57,17 @@ def main(argv: list[str] | None = None) -> int:
         config.camera_index = args.camera
     if args.no_sound:
         config.sound_enabled = False
+    if args.filter:
+        config.pointer_filter = args.filter
+    code = args.usability.strip().upper() if args.usability else None
+    if code is not None and not code.isalnum():
+        logging.getLogger("spectra").error("participant code must be letters and digits only")
+        return 2
 
     from spectra.app import SpectraApp  # imported late: pulls in MediaPipe
 
     try:
-        SpectraApp(config, hand_label=args.hand, session_id=args.session).run()
+        SpectraApp(config, hand_label=args.hand, session_id=args.session, usability_code=code).run()
     except RuntimeError as exc:
         logging.getLogger("spectra").error("%s", exc)
         return 1

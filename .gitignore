@@ -12,6 +12,7 @@ env/
 # Packaging / build
 build/
 dist/
+site/
 *.egg-info/
 .eggs/
 

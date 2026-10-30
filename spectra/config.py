@@ -48,6 +48,24 @@ class AppConfig:
     detection_height: int = 360
 
     pointer_smooth_alpha: float = 0.35
+    #: Pointer filter: "kalman" (default), "exponential" (the original) or "raw".
+    pointer_filter: str = "kalman"
+    kalman_measurement_std: float = 8.0
+    kalman_acceleration_std: float = 900.0
+    #: Pinch (thumb-index distance) also selects buttons, besides dwelling on them.
+    pinch_click: bool = True
+    #: Depth estimator: "area", "area_aspect" (default) or "area_length".
+    depth_method: str = "area_aspect"
+    #: In free drawing, bringing the hand closer makes the brush thicker.
+    depth_brush: bool = True
+    #: Finger touched by the thumb -> colour key in the palette (free drawing).
+    finger_colors: dict = field(
+        default_factory=lambda: {
+            "middle": "color.red",
+            "ring": "color.green",
+            "pinky": "color.blue",
+        }
+    )
     hover_select_secs: float = 1.2
     gesture_hold_secs: float = 1.5
     trail_length: int = 18
@@ -91,6 +109,16 @@ class AppConfig:
         return self.data_dir / "logs"
 
     @property
+    def documents_dir(self) -> Path:
+        """Encrypted clinical documents attached to patients (never plaintext)."""
+        return self.data_dir / "documents"
+
+    @property
+    def tools_dir(self) -> Path:
+        """Downloaded helper executables, such as the Cloudflare tunnel client."""
+        return self.data_dir / "tools"
+
+    @property
     def key_path(self) -> Path:
         return self.data_dir / "secrets" / "master.key"
 
@@ -101,6 +129,11 @@ class AppConfig:
             return bundled
         return self.models_dir / MODEL_FILENAME
 
+    @property
+    def gesture_model_path(self) -> Path:
+        """Learned gestures exported from the panel for the desktop application."""
+        return self.models_dir / "gestures.json"
+
     def ensure_directories(self) -> None:
         for path in (
             self.data_dir,
@@ -109,6 +142,7 @@ class AppConfig:
             self.reports_dir,
             self.exports_dir,
             self.logs_dir,
+            self.documents_dir,
             self.key_path.parent,
         ):
             path.mkdir(parents=True, exist_ok=True)

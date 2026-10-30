@@ -7,13 +7,19 @@ and the UI stays a thin layer of widgets.
 
 from __future__ import annotations
 
+import hashlib
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date
 from pathlib import Path
 
 from spectra.config import AppConfig, load_config
 from spectra.consent import ConsentDocument, load_consent
+from spectra.exercises.catalog import (
+    BUILTIN_SPECS,
+    CUSTOM_PREFIX,
+    ExerciseSpec,
+)
 from spectra.gestures.calibration import CalibrationProfile, build_profile
 from spectra.gestures.profiles import (
     GestureProfile,
@@ -33,6 +39,7 @@ from spectra.storage.models import (
     Hand,
     MetricSummary,
     Patient,
+    PatientDocument,
     Session,
     Sex,
 )
@@ -41,6 +48,54 @@ from spectra.storage.security import is_valid_cpf, is_valid_pin
 logger = logging.getLogger(__name__)
 
 MAX_SAMPLES_PERSISTED = 20_000
+
+DOCUMENT_CATEGORIES = ("physio_report", "medical_report", "exam", "referral", "other")
+MAX_DOCUMENT_BYTES = 10 * 1024 * 1024
+MAX_REPORT_CHARS = 20_000
+#: Accepted uploads, identified by content rather than by the (untrusted) file extension.
+MEDIA_SIGNATURES: dict[str, tuple[bytes, ...]] = {
+    "application/pdf": (b"%PDF-",),
+    "image/png": (b"\x89PNG\r\n\x1a\n",),
+    "image/jpeg": (b"\xff\xd8\xff",),
+}
+
+
+def detect_media_type(content: bytes) -> str | None:
+    for media_type, signatures in MEDIA_SIGNATURES.items():
+        if any(content.startswith(signature) for signature in signatures):
+            return media_type
+    return None
+
+
+@dataclass
+class DocumentForm:
+    """A clinical document to add: a written report, an uploaded file, or both."""
+
+    category: str = "physio_report"
+    title: str = ""
+    issued_on: date | None = None
+    body: str = ""
+    filename: str = ""
+    content: bytes | None = None
+
+    def validate(self) -> list[str]:
+        problems: list[str] = []
+        if self.category not in DOCUMENT_CATEGORIES:
+            problems.append("document.error.category")
+        if not 3 <= len(self.title.strip()) <= 120:
+            problems.append("document.error.title")
+        if self.issued_on and self.issued_on > date.today():
+            problems.append("document.error.date_future")
+        if not self.body.strip() and not self.content:
+            problems.append("document.error.empty")
+        if len(self.body) > MAX_REPORT_CHARS:
+            problems.append("document.error.body_long")
+        if self.content is not None:
+            if len(self.content) > MAX_DOCUMENT_BYTES:
+                problems.append("document.error.too_large")
+            elif detect_media_type(self.content) is None:
+                problems.append("document.error.type")
+        return problems
 
 
 @dataclass
@@ -191,6 +246,138 @@ class SpectraService:
     def has_consent(self, patient_id: str) -> bool:
         return self.db.active_consent(patient_id) is not None
 
+    # --------------------------------------------------------------- learning
+    def save_pinch_calibration(self, patient_id: str, thresholds) -> None:
+        """Keep the finger calibration and add the patient's own click thresholds."""
+        profile = self.calibration_for(patient_id)
+        profile.pinch = thresholds
+        self.save_calibration(patient_id, profile)
+
+    def save_gesture_model(
+        self, patient_id: str, model, bindings: dict[str, str], actor_id: str | None = None
+    ) -> None:
+        from spectra.domains import Command
+
+        model.validate()
+        clean = {label: Command(command).value for label, command in bindings.items() if command}
+        self.db.save_gesture_model(patient_id, model.to_dict(), clean, actor_id=actor_id)
+
+    def load_gesture_model(self, patient_id: str):
+        from spectra.learning.classifier import GestureClassifier
+
+        stored = self.db.get_gesture_model(patient_id)
+        if stored is None:
+            return None, {}
+        model, bindings = stored
+        return GestureClassifier.from_dict(model), bindings
+
+    def export_gesture_model(self, patient_id: str) -> Path:
+        """Write the patient's learned gestures where the desktop application loads them."""
+        import json
+
+        stored = self.db.get_gesture_model(patient_id)
+        if stored is None:
+            raise ValueError("no gesture model for this patient")
+        model, bindings = stored
+        path = self.config.gesture_model_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"model": model, "bindings": bindings}), encoding="utf-8")
+        return path
+
+    # ------------------------------------------------------- custom exercises
+    def custom_exercises(self, patient_id: str) -> list[ExerciseSpec]:
+        specs = []
+        for exercise_id, data in self.db.list_custom_exercises(patient_id):
+            try:
+                specs.append(ExerciseSpec.from_dict(data).with_key(CUSTOM_PREFIX + exercise_id))
+            except (KeyError, TypeError, ValueError):
+                logger.warning("skipping an unreadable custom exercise")
+        return specs
+
+    def available_exercises(self, patient_id: str) -> list[ExerciseSpec]:
+        """Built-in exercises followed by the patient's own ones."""
+        return [*BUILTIN_SPECS.values(), *self.custom_exercises(patient_id)]
+
+    def save_custom_exercise(
+        self, patient_id: str, spec: ExerciseSpec, actor_id: str | None = None
+    ) -> ExerciseSpec:
+        """Validate and store a therapist-defined exercise. Raises ``ValueError`` with keys."""
+        spec = replace(
+            spec,
+            builtin=False,
+            title=spec.title.strip(),
+            instructions=tuple(line.strip() for line in spec.instructions if line.strip()),
+        )
+        problems = spec.validate()
+        if problems:
+            raise ValueError(problems)
+        if self.db.get_patient(patient_id, audit=False) is None:
+            raise ValueError(["exercise.error.patient"])
+        exercise_id = self.db.add_custom_exercise(
+            patient_id, spec.with_key("").to_dict(), actor_id=actor_id
+        )
+        return spec.with_key(CUSTOM_PREFIX + exercise_id)
+
+    def archive_custom_exercise(
+        self, patient_id: str, key: str, actor_id: str | None = None
+    ) -> bool:
+        if not key.startswith(CUSTOM_PREFIX):
+            return False
+        return self.db.archive_custom_exercise(
+            patient_id, key.removeprefix(CUSTOM_PREFIX), actor_id=actor_id
+        )
+
+    def resolve_exercises(self, patient_id: str, keys: tuple[str, ...]) -> tuple[ExerciseSpec, ...]:
+        """Turn the keys chosen for a session into specs; unknown keys raise ``ValueError``."""
+        available = {spec.key: spec for spec in self.available_exercises(patient_id)}
+        unknown = [key for key in keys if key not in available]
+        if unknown or not keys:
+            raise ValueError("unknown exercise")
+        return tuple(available[key] for key in keys)
+
+    # -------------------------------------------------------------- documents
+    def add_document(
+        self, patient_id: str, form: DocumentForm, actor_id: str | None = None
+    ) -> PatientDocument:
+        """Store a written report and/or an uploaded file. Raises ``ValueError`` with keys."""
+        problems = form.validate()
+        if problems:
+            raise ValueError(problems)
+        if self.db.get_patient(patient_id, audit=False) is None:
+            raise ValueError(["document.error.patient"])
+        content = form.content
+        document = PatientDocument(
+            patient_id=patient_id,
+            therapist_id=actor_id,
+            category=form.category,
+            title=form.title.strip(),
+            issued_on=form.issued_on,
+            body=form.body.strip(),
+            filename=Path(form.filename).name[:200] if content else "",
+            media_type=(detect_media_type(content) or "") if content else "",
+            size=len(content) if content else 0,
+            sha256=hashlib.sha256(content).hexdigest() if content else "",
+        )
+        return self.db.add_document(document, content, actor_id=actor_id)
+
+    def written_report_pdf(self, document_id: str, actor_id: str | None = None) -> bytes:
+        """Render a written report as a PDF for printing or sharing with the patient."""
+        from spectra.reports.document import written_report_pdf
+
+        document = self.db.get_document(document_id)
+        if document is None or not document.body:
+            raise ValueError("no written report")
+        patient = self.db.get_patient(document.patient_id, audit=False)
+        therapist = self.db.get_therapist(document.therapist_id) if document.therapist_id else None
+        self.db.audit.record(
+            AuditAction.DOCUMENT_VIEWED, subject_id=document.patient_id, actor_id=actor_id
+        )
+        return written_report_pdf(
+            document,
+            patient_name=patient.name if patient else "",
+            therapist_name=therapist.name if therapist else "",
+        )
+
     # ---------------------------------------------------------------- sessions
     def start_session(self, plan: SessionPlan) -> Session:
         """Open a session. Raises :class:`ConsentRequiredError` without a consent."""
@@ -235,7 +422,11 @@ class SpectraService:
                     ended_at=window.ended_at,
                     reps=window.reps,
                     target=window.target,
-                    payload={"rep_times": list(window.rep_times)},
+                    payload={
+                        "rep_times": list(window.rep_times),
+                        **({"title": window.title} if window.title else {}),
+                        **({"details": window.details} if window.details else {}),
+                    },
                 )
             )
             for metric, payload in analyze_run(recorder, window).items():
@@ -289,7 +480,7 @@ class SpectraService:
             target,
             password,
             db_path=self.config.db_path,
-            extra_dirs=(self.config.reports_dir,),
+            extra_dirs=(self.config.reports_dir, self.config.documents_dir),
         )
         self.db.audit.record(
             AuditAction.BACKUP_CREATED, subject_id=None, subject_type="system", actor_id=actor_id

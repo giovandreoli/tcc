@@ -15,6 +15,8 @@ Invariants enforced here rather than by convention:
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
 import sqlite3
 import threading
@@ -33,6 +35,7 @@ from spectra.storage.models import (
     Hand,
     MetricSummary,
     Patient,
+    PatientDocument,
     Sample,
     Session,
     Sex,
@@ -52,7 +55,7 @@ from spectra.storage.security import (
     verify_secret,
 )
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 3
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_info (version INTEGER NOT NULL);
@@ -176,6 +179,56 @@ CREATE TABLE IF NOT EXISTS browser_room (
     claim_hash TEXT,
     heartbeat_at REAL
 );
+
+CREATE TABLE IF NOT EXISTS custom_exercise (
+    id TEXT PRIMARY KEY,
+    patient_id TEXT NOT NULL REFERENCES patient(id) ON DELETE CASCADE,
+    therapist_id TEXT REFERENCES therapist(id),
+    spec TEXT NOT NULL,
+    created_at REAL NOT NULL,
+    archived_at REAL
+);
+
+CREATE TABLE IF NOT EXISTS patient_document (
+    id TEXT PRIMARY KEY,
+    patient_id TEXT NOT NULL REFERENCES patient(id) ON DELETE CASCADE,
+    therapist_id TEXT REFERENCES therapist(id),
+    category TEXT NOT NULL,
+    title_enc TEXT NOT NULL,
+    issued_on TEXT,
+    body_enc TEXT,
+    filename_enc TEXT,
+    media_type TEXT,
+    size INTEGER NOT NULL DEFAULT 0,
+    sha256 TEXT,
+    created_at REAL NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_exercise_patient ON custom_exercise(patient_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_document_patient ON patient_document(patient_id, created_at);
+
+CREATE TABLE IF NOT EXISTS gesture_model (
+    patient_id TEXT PRIMARY KEY REFERENCES patient(id) ON DELETE CASCADE,
+    model TEXT NOT NULL,
+    bindings TEXT NOT NULL DEFAULT '{}',
+    updated_at REAL NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS usability_participant (
+    code TEXT PRIMARY KEY,
+    created_at REAL NOT NULL,
+    consent INTEGER NOT NULL DEFAULT 0,
+    notes TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS usability_result (
+    id TEXT PRIMARY KEY,
+    code TEXT NOT NULL REFERENCES usability_participant(code) ON DELETE CASCADE,
+    kind TEXT NOT NULL,
+    condition TEXT NOT NULL DEFAULT '',
+    payload TEXT NOT NULL DEFAULT '{}',
+    created_at REAL NOT NULL
+);
 """
 
 
@@ -212,8 +265,15 @@ class Database:
             self._connection.execute(
                 "INSERT INTO schema_info (version) VALUES (?)", (SCHEMA_VERSION,)
             )
+        else:
+            # New tables are created by the idempotent schema script; only the marker moves.
+            self._connection.execute(
+                "UPDATE schema_info SET version = ? WHERE version < ?",
+                (SCHEMA_VERSION, SCHEMA_VERSION),
+            )
         self._connection.commit()
         self.audit = AuditLog(lambda: self._connection)
+        self.documents_dir = self.path.parent / "documents"
 
     @property
     def _connection(self) -> sqlite3.Connection:
@@ -276,6 +336,12 @@ class Database:
         )
         self._connection.commit()
         return therapist
+
+    def get_therapist(self, therapist_id: str) -> Therapist | None:
+        row = self._connection.execute(
+            "SELECT * FROM therapist WHERE id = ?", (therapist_id,)
+        ).fetchone()
+        return self._therapist_from_row(row) if row else None
 
     def get_therapist_by_email(self, email: str) -> Therapist | None:
         row = self._connection.execute(
@@ -752,6 +818,222 @@ class Database:
             for row in rows
         ]
 
+    # --------------------------------------------------------- gesture models
+    def save_gesture_model(
+        self,
+        patient_id: str,
+        model: dict[str, Any],
+        bindings: dict[str, str],
+        actor_id: str | None = None,
+    ) -> None:
+        """Store the patient's learned gestures (pose features only, never images)."""
+        self._connection.execute(
+            "INSERT INTO gesture_model (patient_id, model, bindings, updated_at)"
+            " VALUES (?, ?, ?, ?) ON CONFLICT(patient_id) DO UPDATE SET"
+            " model = excluded.model, bindings = excluded.bindings,"
+            " updated_at = excluded.updated_at",
+            (patient_id, json.dumps(model), json.dumps(bindings), utc_now()),
+        )
+        self._connection.commit()
+        self.audit.record(AuditAction.GESTURES_SAVED, subject_id=patient_id, actor_id=actor_id)
+
+    def get_gesture_model(self, patient_id: str) -> tuple[dict[str, Any], dict[str, str]] | None:
+        row = self._connection.execute(
+            "SELECT model, bindings FROM gesture_model WHERE patient_id = ?", (patient_id,)
+        ).fetchone()
+        return (json.loads(row["model"]), json.loads(row["bindings"])) if row else None
+
+    # ------------------------------------------------------------ user tests
+    def add_participant(self, code: str, consent: bool, notes: str = "") -> None:
+        """Register an anonymous test participant. The code must not identify the person."""
+        self._connection.execute(
+            "INSERT INTO usability_participant (code, created_at, consent, notes)"
+            " VALUES (?, ?, ?, ?) ON CONFLICT(code) DO UPDATE SET consent = excluded.consent,"
+            " notes = excluded.notes",
+            (code, utc_now(), int(consent), notes),
+        )
+        self._connection.commit()
+
+    def list_participants(self) -> list[dict[str, Any]]:
+        rows = self._connection.execute(
+            "SELECT * FROM usability_participant ORDER BY code"
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def add_usability_result(
+        self, code: str, kind: str, condition: str, payload: dict[str, Any]
+    ) -> str:
+        if not self._connection.execute(
+            "SELECT 1 FROM usability_participant WHERE code = ?", (code,)
+        ).fetchone():
+            self.add_participant(code, consent=False)
+        result_id = new_id()
+        self._connection.execute(
+            "INSERT INTO usability_result (id, code, kind, condition, payload, created_at)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            (result_id, code, kind, condition, json.dumps(payload), utc_now()),
+        )
+        self._connection.commit()
+        return result_id
+
+    def list_usability_results(self, code: str | None = None) -> list[dict[str, Any]]:
+        query = "SELECT * FROM usability_result"
+        args: tuple = ()
+        if code is not None:
+            query += " WHERE code = ?"
+            args = (code,)
+        rows = self._connection.execute(query + " ORDER BY created_at", args).fetchall()
+        return [{**dict(row), "payload": json.loads(row["payload"])} for row in rows]
+
+    def delete_participant(self, code: str) -> None:
+        self._connection.execute("DELETE FROM usability_participant WHERE code = ?", (code,))
+        self._connection.commit()
+
+    # ------------------------------------------------------ custom exercises
+    def add_custom_exercise(
+        self, patient_id: str, spec: dict[str, Any], actor_id: str | None = None
+    ) -> str:
+        """Store a validated exercise spec for one patient; returns its id."""
+        exercise_id = new_id()
+        self._connection.execute(
+            "INSERT INTO custom_exercise (id, patient_id, therapist_id, spec, created_at)"
+            " VALUES (?, ?, ?, ?, ?)",
+            (exercise_id, patient_id, actor_id, json.dumps(spec), utc_now()),
+        )
+        self._connection.commit()
+        self.audit.record(AuditAction.EXERCISE_SAVED, subject_id=patient_id, actor_id=actor_id)
+        return exercise_id
+
+    def list_custom_exercises(self, patient_id: str) -> list[tuple[str, dict[str, Any]]]:
+        """Active exercises of a patient as ``(id, spec)``, oldest first."""
+        rows = self._connection.execute(
+            "SELECT id, spec FROM custom_exercise WHERE patient_id = ? AND archived_at IS NULL"
+            " ORDER BY created_at",
+            (patient_id,),
+        ).fetchall()
+        return [(row["id"], json.loads(row["spec"])) for row in rows]
+
+    def archive_custom_exercise(
+        self, patient_id: str, exercise_id: str, actor_id: str | None = None
+    ) -> bool:
+        """Hide an exercise from new sessions; past sessions keep their copy of the spec."""
+        updated = self._connection.execute(
+            "UPDATE custom_exercise SET archived_at = ?"
+            " WHERE id = ? AND patient_id = ? AND archived_at IS NULL",
+            (utc_now(), exercise_id, patient_id),
+        )
+        self._connection.commit()
+        if updated.rowcount == 1:
+            self.audit.record(
+                AuditAction.EXERCISE_ARCHIVED, subject_id=patient_id, actor_id=actor_id
+            )
+        return updated.rowcount == 1
+
+    # ------------------------------------------------------------- documents
+    def _document_path(self, document_id: str) -> Path:
+        return self.documents_dir / f"{document_id}.bin"
+
+    def add_document(
+        self,
+        document: PatientDocument,
+        content: bytes | None = None,
+        actor_id: str | None = None,
+    ) -> PatientDocument:
+        """Store a document. The file is encrypted and named by UUID only."""
+        if content is not None:
+            self.documents_dir.mkdir(parents=True, exist_ok=True)
+            self._document_path(document.id).write_bytes(self._cipher.encrypt_bytes(content))
+        try:
+            self._connection.execute(
+                "INSERT INTO patient_document (id, patient_id, therapist_id, category,"
+                " title_enc, issued_on, body_enc, filename_enc, media_type, size, sha256,"
+                " created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    document.id,
+                    document.patient_id,
+                    document.therapist_id,
+                    document.category,
+                    self._cipher.encrypt(document.title),
+                    _to_iso(document.issued_on),
+                    self._cipher.encrypt(document.body),
+                    self._cipher.encrypt(document.filename),
+                    document.media_type or None,
+                    document.size,
+                    document.sha256 or None,
+                    document.created_at,
+                ),
+            )
+            self._connection.commit()
+        except Exception:
+            self._document_path(document.id).unlink(missing_ok=True)
+            raise
+        self.audit.record(
+            AuditAction.DOCUMENT_ADDED, subject_id=document.patient_id, actor_id=actor_id
+        )
+        return document
+
+    def _document_from_row(self, row: sqlite3.Row) -> PatientDocument:
+        return PatientDocument(
+            id=row["id"],
+            patient_id=row["patient_id"],
+            therapist_id=row["therapist_id"],
+            category=row["category"],
+            title=self._cipher.decrypt(row["title_enc"]) or "",
+            issued_on=_from_iso(row["issued_on"]),
+            body=self._cipher.decrypt(row["body_enc"]) or "",
+            filename=self._cipher.decrypt(row["filename_enc"]) or "",
+            media_type=row["media_type"] or "",
+            size=row["size"] or 0,
+            sha256=row["sha256"] or "",
+            created_at=row["created_at"],
+        )
+
+    def list_documents(self, patient_id: str) -> list[PatientDocument]:
+        """Documents of a patient, newest first. File contents are not loaded."""
+        rows = self._connection.execute(
+            "SELECT * FROM patient_document WHERE patient_id = ? ORDER BY created_at DESC",
+            (patient_id,),
+        ).fetchall()
+        return [self._document_from_row(row) for row in rows]
+
+    def get_document(self, document_id: str) -> PatientDocument | None:
+        row = self._connection.execute(
+            "SELECT * FROM patient_document WHERE id = ?", (document_id,)
+        ).fetchone()
+        return self._document_from_row(row) if row else None
+
+    def read_document_file(self, document_id: str, actor_id: str | None = None) -> bytes:
+        """Decrypt an attached file, checking its integrity, and audit the access."""
+        document = self.get_document(document_id)
+        if document is None or not document.has_file:
+            raise StorageError("unknown document")
+        content = self._cipher.decrypt_bytes(self._document_path(document_id).read_bytes())
+        if document.sha256 and hashlib.sha256(content).hexdigest() != document.sha256:
+            raise StorageError("document integrity check failed")
+        self.audit.record(
+            AuditAction.DOCUMENT_VIEWED, subject_id=document.patient_id, actor_id=actor_id
+        )
+        return content
+
+    def delete_document(self, document_id: str, actor_id: str | None = None) -> bool:
+        document = self.get_document(document_id)
+        if document is None:
+            return False
+        self._connection.execute("DELETE FROM patient_document WHERE id = ?", (document_id,))
+        self._connection.commit()
+        self._document_path(document_id).unlink(missing_ok=True)
+        self.audit.record(
+            AuditAction.DOCUMENT_DELETED, subject_id=document.patient_id, actor_id=actor_id
+        )
+        return True
+
+    def _purge_document_files(self, patient_id: str) -> None:
+        rows = self._connection.execute(
+            "SELECT id FROM patient_document WHERE patient_id = ?", (patient_id,)
+        ).fetchall()
+        for row in rows:
+            self._document_path(row["id"]).unlink(missing_ok=True)
+
     # ------------------------------------------------- LGPD data subject rights
     def export_patient(self, patient_id: str, actor_id: str | None = None) -> dict[str, Any]:
         """Full export of one patient's data, decrypted, for the LGPD access right."""
@@ -809,6 +1091,34 @@ class Database:
                 }
                 for session in sessions
             ],
+            "custom_exercises": [
+                {"id": exercise_id, "spec": spec}
+                for exercise_id, spec in self.list_custom_exercises(patient_id)
+            ],
+            "gesture_model": self.get_gesture_model(patient_id),
+            "documents": [
+                {
+                    "id": document.id,
+                    "category": document.category,
+                    "title": document.title,
+                    "issued_on": _to_iso(document.issued_on),
+                    "body": document.body,
+                    "filename": document.filename,
+                    "media_type": document.media_type,
+                    "sha256": document.sha256,
+                    "created_at": document.created_at,
+                    "content_base64": (
+                        base64.b64encode(
+                            self._cipher.decrypt_bytes(
+                                self._document_path(document.id).read_bytes()
+                            )
+                        ).decode("ascii")
+                        if document.has_file and self._document_path(document.id).is_file()
+                        else None
+                    ),
+                }
+                for document in self.list_documents(patient_id)
+            ],
         }
         self.audit.record(AuditAction.PATIENT_EXPORTED, subject_id=patient_id, actor_id=actor_id)
         return export
@@ -828,8 +1138,11 @@ class Database:
         """Strip every identifier but keep the measurements for research.
 
         This is the option to prefer over deletion when the participant withdraws but
-        agreed that anonymous data may be kept.
+        agreed that anonymous data may be kept. Attached documents and written reports
+        identify the person, so they are erased rather than kept.
         """
+        self._purge_document_files(patient_id)
+        self._connection.execute("DELETE FROM patient_document WHERE patient_id = ?", (patient_id,))
         self._connection.execute(
             "UPDATE patient SET name = ?, cpf_enc = NULL, cpf_hash = NULL, phone_enc = NULL,"
             " address_enc = NULL, contraindications_enc = NULL, notes_enc = NULL,"
@@ -841,7 +1154,8 @@ class Database:
         self.audit.record(AuditAction.PATIENT_ANONYMIZED, subject_id=patient_id, actor_id=actor_id)
 
     def delete_patient(self, patient_id: str, actor_id: str | None = None) -> None:
-        """Erase the patient and everything cascading from them."""
+        """Erase the patient and everything cascading from them, including document files."""
+        self._purge_document_files(patient_id)
         self._connection.execute("DELETE FROM patient WHERE id = ?", (patient_id,))
         self._connection.commit()
         self.audit.record(AuditAction.PATIENT_DELETED, subject_id=patient_id, actor_id=actor_id)

@@ -17,6 +17,8 @@ import numpy as np
 from spectra.core.canvas import DEFAULT_BRUSH_SIZE, ERASER_SIZE, DrawingCanvas
 from spectra.core.trail import Trail
 from spectra.detection.hand_detector import DetectionResult
+from spectra.gestures.depth import Motion
+from spectra.gestures.finger_colors import FingerColorSelector
 from spectra.gestures.state_machine import GestureState
 from spectra.i18n import t
 from spectra.modes.base import BaseMode, FrameContext, ModeContext
@@ -30,10 +32,19 @@ ACTION_SAVE = "save"
 ACTION_UNDO = "undo"
 
 FEEDBACK_SECONDS = 2.5
+MIN_BRUSH, MAX_BRUSH = 2, 36
 
 #: Gestures during which the dwell buttons stay live. While painting or erasing the
 #: pointer is busy drawing and must not trip a button it happens to cross.
 INTERACTIVE_STATES = (GestureState.IDLE, GestureState.POINTING)
+#: Gestures during which touching the thumb to a finger may change the colour. The open-hand
+#: colour menu is included: choosing a colour by finger there is natural.
+COLOR_SELECT_STATES = (GestureState.IDLE, GestureState.POINTING, GestureState.COLOR_MENU)
+
+
+def depth_brush_size(base: int, scale: float) -> int:
+    """Brush grows as the hand comes closer (scale > 1) and thins as it moves away."""
+    return max(MIN_BRUSH, min(MAX_BRUSH, round(base * scale**1.5)))
 
 
 class FreeDrawMode(BaseMode):
@@ -85,6 +96,30 @@ class FreeDrawMode(BaseMode):
         ]
         self.buttons += self.navigation_buttons()
         self.swatches = self._build_swatches()
+        self.base_brush = self.brush_size
+        self.finger_colors = FingerColorSelector(config.finger_colors)
+        self._entries_by_key = {entry.label_key: entry for entry in COLOR_ENTRIES}
+
+    # --------------------------------------------------------- finger colours
+    def _select_finger_color(self, context: FrameContext) -> None:
+        if context.gesture not in COLOR_SELECT_STATES:
+            self.finger_colors.reset()
+            return
+        finger = self.finger_colors.update(context.landmarks, context.at)
+        entry = self._entries_by_key.get(self.finger_colors.bindings.get(finger, ""))
+        if entry is None:
+            return
+        self.color_label = entry.label
+        self.color_bgr = entry.color or self.color_bgr
+        self._feedback(t("paint.finger_color", color=entry.label, finger=t(f"finger.{finger}")))
+        self.context.sound.success()
+
+    def _apply_depth(self, context: FrameContext) -> None:
+        if not self.context.config.depth_brush or context.depth is None:
+            return
+        if context.depth.motion is Motion.ROTATION:
+            return  # turning the hand must not change the stroke
+        self.brush_size = depth_brush_size(self.base_brush, context.depth.scale)
 
     # -------------------------------------------------------------- colour menu
     def _build_swatches(self) -> list[Button]:
@@ -167,6 +202,8 @@ class FreeDrawMode(BaseMode):
         height, width = frame.shape[:2]
         context = self.observe(frame.shape, detection)
         composite = cv2.addWeighted(self.canvas.image, 0.65, frame, 0.35, 0)
+        self._select_finger_color(context)
+        self._apply_depth(context)
 
         if context.gesture is GestureState.PAINTING:
             self._paint(context.pointer, self.color_bgr)
@@ -242,6 +279,18 @@ class FreeDrawMode(BaseMode):
         cv2.circle(frame, (230, 14), 12, (255, 255, 255), 1)
         draw_text(frame, self.color_label, (248, 20), 0.58)
         draw_text(frame, t("paint.brush", size=self.brush_size), (420, 20), 0.48, (180, 180, 180))
+        if context.depth is not None:
+            draw_text(
+                frame,
+                t(
+                    "paint.depth",
+                    scale=f"{context.depth.scale:.2f}",
+                    motion=t(f"depth.motion.{context.depth.motion.value}"),
+                ),
+                (420, 40),
+                0.42,
+                (150, 200, 255),
+            )
         draw_text(
             frame,
             t("paint.gesture", gesture=t(f"gesture.state.{context.gesture.value}")),
@@ -252,5 +301,5 @@ class FreeDrawMode(BaseMode):
         progress = self.engine.machine.hold_progress
         if progress > 0 and context.gesture is GestureState.IDLE:
             draw_progress_bar(frame, (14, frame.shape[0] - 74), (160, 8), progress)
-        for i, key in enumerate(("paint.legend_1", "paint.legend_2")):
+        for i, key in enumerate(("paint.legend_1", "paint.legend_2", "paint.legend_3")):
             draw_text(frame, t(key), (width - 420, 18 + i * 16), 0.38, (170, 170, 170))

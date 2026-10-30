@@ -14,12 +14,38 @@ import datetime as dt
 
 import streamlit as st
 
-from spectra.browser.rooms import EXERCISES, RoomError, Rooms
+from spectra.browser.rooms import RoomError, Rooms
 from spectra.config import load_config
+from spectra.exercises.catalog import (
+    BUILTIN_KEYS,
+    DIRECTIONS,
+    FINGERS,
+    MAX_HOLD_SECONDS,
+    MAX_REPS,
+    MIN_REPS,
+    MOVEMENT_PARAMS,
+    TOLERANCES,
+    ExerciseSpec,
+    Movement,
+)
 from spectra.gestures.profiles import PRESETS
 from spectra.guided.shapes import SHAPE_ORDER, Difficulty
 from spectra.i18n import set_locale, t
-from spectra.service import PatientForm, SessionPlan, SpectraService
+from spectra.remote import (
+    Tunnel,
+    TunnelError,
+    download_cloudflared,
+    find_cloudflared,
+    is_local_request,
+    patient_link,
+)
+from spectra.service import (
+    DOCUMENT_CATEGORIES,
+    DocumentForm,
+    PatientForm,
+    SessionPlan,
+    SpectraService,
+)
 from spectra.storage.db import AccountLockedError, ConsentRequiredError, DuplicateCPFError
 from spectra.storage.models import Hand, Sex
 from spectra.storage.security import mask_cpf
@@ -28,7 +54,17 @@ from spectra.webui import components as ui
 from spectra.webui.insights import overview, pain_series
 
 PAGE_TITLE = "SPECTRA"
-SECTIONS = ("home", "patients", "consent", "session", "history", "privacy")
+SECTIONS = (
+    "home",
+    "patients",
+    "consent",
+    "exercises",
+    "documents",
+    "session",
+    "learning",
+    "history",
+    "privacy",
+)
 ROOM_TONES = {
     "waiting": "waiting",
     "active": "active",
@@ -46,6 +82,25 @@ def get_service() -> SpectraService:
     return SpectraService.open(config)
 
 
+@st.cache_resource
+def get_tunnel_holder() -> dict[str, Tunnel | None]:
+    """One tunnel per panel process, shared by every browser tab of the therapist."""
+    return {"tunnel": None}
+
+
+def _active_tunnel() -> Tunnel | None:
+    tunnel = get_tunnel_holder()["tunnel"]
+    return tunnel if tunnel is not None and tunnel.running and tunnel.url else None
+
+
+def _request_is_local() -> bool:
+    try:
+        return is_local_request(dict(st.context.headers))
+    except Exception:
+        # Without request headers we cannot prove the request is local: fail closed.
+        return False
+
+
 def _therapist_id() -> str | None:
     return st.session_state.get("therapist_id")
 
@@ -57,6 +112,9 @@ def _demo_mode() -> bool:
 def _patient_label(patient) -> str:
     name = patient.display_name(_demo_mode())
     return f"{name} — {mask_cpf(patient.cpf)}"
+
+
+_md = ui.escape_markdown
 
 
 # ----------------------------------------------------------------------- login
@@ -150,7 +208,7 @@ def render_room_monitor(service: SpectraService, patients: dict) -> None:
         patient = patients.get(room.patient_id)
         with st.container(border=True):
             left, right = st.columns([3, 2])
-            left.markdown(f"**{_patient_label(patient) if patient else '—'}**")
+            left.markdown(f"**{_md(_patient_label(patient)) if patient else '—'}**")
             left.caption(
                 t(
                     "ux.home.room_created",
@@ -163,7 +221,7 @@ def render_room_monitor(service: SpectraService, patients: dict) -> None:
                 right.caption(
                     t(
                         "ux.home.live",
-                        exercise=t(f"physio.exercise.{status.exercise}"),
+                        exercise=_md(status.exercise_title),
                         reps=status.reps,
                         total=status.total_reps,
                         hand=t(
@@ -277,6 +335,269 @@ def render_consent(service: SpectraService) -> None:
         st.rerun()
 
 
+# ------------------------------------------------------------------- exercises
+def render_exercises(service: SpectraService) -> None:
+    st.header(t("panel.section.exercises"))
+    patients = service.db.list_patients()
+    if not patients:
+        ui.guide("sleep", t("ux.empty.patients"))
+        return
+    patient = st.selectbox(t("report.field.patient"), patients, format_func=_patient_label)
+    ui.guide("think", t("exercise.panel.intro"), t("ux.mascot.name"))
+    flash = st.session_state.pop("exercise_flash", None)
+    if flash:
+        st.success(t("exercise.panel.saved", title=flash))
+
+    custom = service.custom_exercises(patient.id)
+    st.subheader(t("exercise.panel.list"))
+    if not custom:
+        st.caption(t("exercise.panel.empty"))
+    for spec in custom:
+        with st.container(border=True):
+            left, right = st.columns([4, 1])
+            left.markdown(f"**{_md(spec.display_title())}** · {_md(spec.movement.title)}")
+            left.caption(_md(spec.summary()))
+            for line in spec.display_instructions():
+                left.caption(_md(line))
+            if right.button(t("exercise.panel.archive"), key=f"archive_{spec.key}"):
+                service.archive_custom_exercise(patient.id, spec.key, actor_id=_therapist_id())
+                st.rerun()
+
+    with st.expander(t("exercise.panel.new"), expanded=not custom):
+        _render_exercise_form(service, patient)
+
+    st.subheader(t("exercise.panel.test"))
+    st.caption(t("exercise.panel.test_hint"))
+    options = service.available_exercises(patient.id)
+    chosen = st.selectbox(
+        t("exercise.panel.test_choose"),
+        options,
+        format_func=lambda spec: spec.display_title(),
+        key=f"practice_choice_{patient.id}",
+    )
+    _render_practice(chosen, patient.affected_hand.value, service.calibration_for(patient.id))
+
+
+def _render_exercise_form(service: SpectraService, patient) -> None:
+    movement = st.selectbox(
+        t("exercise.field.movement"),
+        list(Movement),
+        format_func=lambda item: item.title,
+        key="new_exercise_movement",
+    )
+    st.caption(movement.description)
+    accepted = MOVEMENT_PARAMS[movement]
+    with st.form("new_exercise", clear_on_submit=True):
+        title = st.text_input(t("exercise.field.title"), max_chars=60)
+        reps = st.slider(t("exercise.field.reps"), MIN_REPS, MAX_REPS, 8)
+        values: dict = {}
+        if "finger" in accepted:
+            values["finger"] = st.selectbox(
+                t("exercise.field.finger"), FINGERS, format_func=lambda key: t(f"finger.{key}")
+            )
+        if "tolerance" in accepted:
+            values["tolerance"] = st.select_slider(
+                t("exercise.field.tolerance"),
+                TOLERANCES,
+                value="normal",
+                format_func=lambda key: t(f"exercise.tolerance.{key}"),
+                help=t("exercise.field.tolerance_help"),
+            )
+        if "direction" in accepted:
+            values["direction"] = st.radio(
+                t("exercise.field.direction"),
+                DIRECTIONS,
+                format_func=lambda key: t(f"exercise.direction.{key}"),
+                horizontal=True,
+            )
+        if "isolated" in accepted:
+            values["isolated"] = st.checkbox(
+                t("exercise.field.isolated"), help=t("exercise.field.isolated_help")
+            )
+        if "hold_seconds" in accepted:
+            values["hold_seconds"] = st.slider(
+                t("exercise.field.hold"), 0.0, MAX_HOLD_SECONDS, 0.0, step=0.5, format="%.1f s"
+            )
+        instructions = st.text_area(
+            t("exercise.field.instructions"), help=t("exercise.field.instructions_help")
+        )
+        submitted = st.form_submit_button(t("exercise.panel.save"), type="primary")
+    if submitted:
+        spec = ExerciseSpec(
+            key="",
+            movement=movement,
+            title=title,
+            instructions=tuple(line for line in instructions.splitlines() if line.strip()),
+            target_reps=reps,
+            **values,
+        )
+        try:
+            saved = service.save_custom_exercise(patient.id, spec, actor_id=_therapist_id())
+        except ValueError as exc:
+            _show_problems(exc)
+            return
+        st.session_state["exercise_flash"] = saved.display_title()
+        st.rerun()
+
+
+def _show_problems(exc: ValueError) -> None:
+    problems = exc.args[0] if exc.args and isinstance(exc.args[0], list) else []
+    for key in problems:
+        st.error(t(key))
+
+
+def _render_practice(spec: ExerciseSpec, hand_label: str, calibration) -> None:
+    from spectra.browser.session import LandmarkSession
+    from spectra.browser.video import reset_camera
+
+    state_key = f"practice_{spec.key}_{hand_label}"
+    session = st.session_state.get(state_key)
+    if session is None or session.finished:
+        session = LandmarkSession((spec,), hand_label=hand_label, calibration=calibration)
+        st.session_state[state_key] = session
+    camera, panel = st.columns([2, 1], gap="large")
+    with camera:
+        _practice_camera(session, state_key)
+    with panel:
+        _practice_status(session)
+        if st.button(t("exercise.panel.test_reset"), key=f"{state_key}_reset"):
+            st.session_state.pop(state_key, None)
+            reset_camera(f"{state_key}_camera")
+            st.rerun()
+
+
+@st.fragment
+def _practice_camera(session, state_key: str) -> None:
+    from spectra.browser.video import camera_streamer
+
+    camera_streamer(session, f"{state_key}_camera")
+
+
+@st.fragment(run_every=1)
+def _practice_status(session) -> None:
+    status = session.status()
+    st.metric(t("ux.live.reps"), f"{status.reps}/{status.target}")
+    st.progress(min(1.0, status.reps / status.target) if status.target else 0.0)
+    if status.frames:
+        st.html(art.bubble_html("calm", status.cue or t("exercise.cue.show_hand"), size=40))
+        if status.hold_fraction > 0:
+            st.progress(status.hold_fraction, text=t("ux.live.hold"))
+        st.caption(t("exercise.panel.test_frames", frames=status.frames))
+    else:
+        st.caption(t("browser.waiting_camera"))
+
+
+# ------------------------------------------------------------------- documents
+def render_documents(service: SpectraService) -> None:
+    st.header(t("panel.section.documents"))
+    patients = service.db.list_patients()
+    if not patients:
+        ui.guide("sleep", t("ux.empty.patients"))
+        return
+    patient = st.selectbox(t("report.field.patient"), patients, format_func=_patient_label)
+    st.caption(t("document.privacy"))
+
+    write, upload = st.tabs([t("document.tab.write"), t("document.tab.upload")])
+    with write, st.form("write_report", clear_on_submit=True):
+        category = st.selectbox(
+            t("document.field.category"),
+            DOCUMENT_CATEGORIES,
+            format_func=lambda key: t(f"document.category.{key}"),
+        )
+        title = st.text_input(t("document.field.title"), value=t("document.default_title"))
+        issued = st.date_input(t("document.field.issued_on"), value=dt.date.today())
+        body = st.text_area(t("document.field.body"), height=260, help=t("document.body_help"))
+        if st.form_submit_button(t("document.save"), type="primary"):
+            _save_document(
+                service,
+                patient.id,
+                DocumentForm(category=category, title=title, issued_on=issued, body=body),
+            )
+    with upload, st.form("upload_report", clear_on_submit=True):
+        category = st.selectbox(
+            t("document.field.category"),
+            DOCUMENT_CATEGORIES,
+            index=1,
+            format_func=lambda key: t(f"document.category.{key}"),
+        )
+        title = st.text_input(t("document.field.title"))
+        issued = st.date_input(t("document.field.issued_on"), value=None)
+        attached = st.file_uploader(
+            t("document.field.file"),
+            type=["pdf", "png", "jpg", "jpeg"],
+            help=t("document.file_help"),
+        )
+        notes = st.text_area(t("document.field.notes"))
+        if st.form_submit_button(t("document.attach"), type="primary"):
+            _save_document(
+                service,
+                patient.id,
+                DocumentForm(
+                    category=category,
+                    title=title,
+                    issued_on=issued,
+                    body=notes,
+                    filename=attached.name if attached else "",
+                    content=attached.getvalue() if attached else None,
+                ),
+            )
+
+    st.subheader(t("document.list"))
+    documents = service.db.list_documents(patient.id)
+    if not documents:
+        ui.guide("sleep", t("document.empty"))
+    for document in documents:
+        _render_document(service, document)
+
+
+def _save_document(service: SpectraService, patient_id: str, form: DocumentForm) -> None:
+    try:
+        service.add_document(patient_id, form, actor_id=_therapist_id())
+    except ValueError as exc:
+        _show_problems(exc)
+        return
+    st.success(t("document.saved"))
+
+
+def _render_document(service: SpectraService, document) -> None:
+    issued = (
+        document.issued_on.strftime("%d/%m/%Y")
+        if document.issued_on
+        else dt.datetime.fromtimestamp(document.created_at).strftime("%d/%m/%Y")
+    )
+    category = t(f"document.category.{document.category}")
+    parts = [document.title] + ([category] if category != document.title else []) + [issued]
+    with st.expander(" · ".join(parts)):
+        if document.has_file:
+            st.caption(t("document.file_info", name=document.filename, kb=document.size // 1024))
+        if document.body:
+            st.text(document.body)
+        prepared = st.session_state.get("prepared_document")
+        columns = st.columns(2)
+        if prepared and prepared[0] == document.id:
+            _, data, name, media = prepared
+            columns[0].download_button(t("document.download"), data, file_name=name, mime=media)
+        elif columns[0].button(t("document.prepare"), key=f"prepare_{document.id}"):
+            # Decrypting is an audited access, so it happens on request, not on every render.
+            if document.has_file:
+                data = service.db.read_document_file(document.id, actor_id=_therapist_id())
+                name, media = document.filename or f"{document.id}.bin", document.media_type
+            else:
+                data = service.written_report_pdf(document.id, actor_id=_therapist_id())
+                name, media = f"laudo_{document.id[:8]}.pdf", "application/pdf"
+            st.session_state["prepared_document"] = (document.id, data, name, media)
+            st.rerun()
+        if columns[1].button(t("document.delete"), key=f"delete_{document.id}"):
+            if st.session_state.get("confirm_document") == document.id:
+                service.db.delete_document(document.id, actor_id=_therapist_id())
+                st.session_state.pop("confirm_document", None)
+                st.session_state.pop("prepared_document", None)
+                st.rerun()
+            else:
+                st.session_state["confirm_document"] = document.id
+                st.warning(t("document.confirm_delete"))
+
+
 # --------------------------------------------------------------------- session
 def render_session(service: SpectraService) -> None:
     st.header(t("panel.section.session"))
@@ -296,7 +617,9 @@ def render_session(service: SpectraService) -> None:
         == "browser"
     )
     if browser_mode:
-        st.info(t("browser.local_only"))
+        render_remote_access(service)
+    available = service.available_exercises(patient.id)
+    titles = {spec.key: spec.display_title() for spec in available}
     columns = st.columns(3)
     plan = SessionPlan(
         patient_id=patient.id,
@@ -322,9 +645,11 @@ def render_session(service: SpectraService) -> None:
         exercises=tuple(
             st.multiselect(
                 t("panel.field.exercises"),
-                list(EXERCISES) if browser_mode else [*EXERCISES, *SHAPE_ORDER],
-                default=["open_close", "finger_touch", "finger_wave"],
-                key=f"exercises_{browser_mode}",
+                list(titles) if browser_mode else [*BUILTIN_KEYS, *SHAPE_ORDER],
+                default=list(BUILTIN_KEYS),
+                format_func=lambda key: titles.get(key, key),
+                key=f"exercises_{browser_mode}_{patient.id}",
+                help=t("panel.session.exercises_help"),
             )
         ),
         demo_mode=_demo_mode(),
@@ -374,8 +699,53 @@ def render_session(service: SpectraService) -> None:
         ui.guide("cheer", t("browser.created"), t("ux.mascot.name"))
         st.code(code, language=None)
         st.link_button(t("browser.open_patient"), f"?paciente=1&sala={code}", type="primary")
+        tunnel = _active_tunnel()
+        if tunnel is not None and tunnel.url:
+            st.markdown(f"**{t('remote.patient_link')}**")
+            st.code(patient_link(tunnel.url, code), language=None)
+            st.caption(t("remote.patient_link_hint"))
         st.caption(t("browser.code_hint"))
         st.caption(t("ux.home.monitor_hint"))
+
+
+def render_remote_access(service: SpectraService) -> None:
+    """Turn the free Cloudflare tunnel on or off for patients at home."""
+    holder = get_tunnel_holder()
+    tunnel = _active_tunnel()
+    with st.container(border=True):
+        st.markdown(f"**{t('remote.title')}**")
+        if tunnel is not None:
+            st.success(t("remote.active", url=tunnel.url))
+            st.caption(t("remote.active_hint"))
+            if st.button(t("remote.stop")):
+                tunnel.stop()
+                holder["tunnel"] = None
+                st.rerun()
+            return
+        st.caption(t("remote.explain"))
+        binary = find_cloudflared(service.config.tools_dir)
+        if binary is None:
+            st.caption(t("remote.missing"))
+            if st.button(t("remote.download")):
+                with st.spinner(t("remote.downloading")):
+                    try:
+                        download_cloudflared(service.config.tools_dir)
+                    except TunnelError as exc:
+                        st.error(t(str(exc)))
+                        return
+                st.rerun()
+            return
+        if st.button(t("remote.start"), type="primary"):
+            port = int(st.get_option("server.port") or 8501)
+            candidate = Tunnel(binary, port)
+            with st.spinner(t("remote.starting")):
+                try:
+                    candidate.start()
+                except TunnelError as exc:
+                    st.error(t(str(exc)))
+                    return
+            holder["tunnel"] = candidate
+            st.rerun()
 
 
 # --------------------------------------------------------------------- history
@@ -532,6 +902,14 @@ def main() -> None:
     st.set_page_config(page_title=PAGE_TITLE, page_icon="👻", layout="wide")
     service = get_service()
     ui.apply_theme()
+
+    # Requests arriving through the internet tunnel only ever see the patient page.
+    if not _request_is_local():
+        from spectra.browser.page import render_patient
+
+        render_patient(service)
+        return
+
     ui.splash_once()
 
     if st.query_params.get("paciente") == "1" or "sala" in st.query_params:
@@ -570,10 +948,19 @@ def main() -> None:
         "home": render_home,
         "patients": render_patients,
         "consent": render_consent,
+        "exercises": render_exercises,
+        "documents": render_documents,
         "session": render_session,
+        "learning": render_learning,
         "history": render_history,
         "privacy": render_privacy,
     }[section](service)
+
+
+def render_learning(service: SpectraService) -> None:
+    from spectra.therapist_panel.learning import render_learning as render
+
+    render(service)
 
 
 if __name__ == "__main__":

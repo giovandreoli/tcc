@@ -1,4 +1,4 @@
-"""Expiring room codes and exclusive admission for local browser sessions."""
+"""Expiring room codes and exclusive admission for browser sessions."""
 
 from __future__ import annotations
 
@@ -7,11 +7,12 @@ import json
 import secrets
 from dataclasses import dataclass
 
+from spectra.exercises.catalog import BUILTIN_KEYS, ExerciseSpec, specs_from_json
 from spectra.service import SessionPlan, SpectraService
 from spectra.storage.db import AccountLockedError
 from spectra.storage.models import Session, utc_now
 
-EXERCISES = ("open_close", "finger_touch", "finger_wave")
+EXERCISES = BUILTIN_KEYS
 CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 ROOM_LIFETIME_SECONDS = 3600
 LEASE_SECONDS = 90
@@ -35,7 +36,7 @@ class RoomAdmission:
     code_hash: str
     claim: str
     duration_minutes: int
-    exercises: tuple[str, ...]
+    exercises: tuple[ExerciseSpec, ...]
 
 
 @dataclass(frozen=True)
@@ -82,12 +83,12 @@ class Rooms:
         return rooms
 
     def create(self, plan: SessionPlan) -> str:
-        if (
-            not plan.exercises
-            or any(exercise not in EXERCISES for exercise in plan.exercises)
-            or not 5 <= plan.duration_minutes <= 40
-        ):
+        if not plan.exercises or not 5 <= plan.duration_minutes <= 40:
             raise RoomError("browser.invalid_plan")
+        try:
+            specs = self.service.resolve_exercises(plan.patient_id, tuple(plan.exercises))
+        except ValueError as exc:
+            raise RoomError("browser.invalid_plan") from exc
         patient = self.service.db.get_patient(plan.patient_id, audit=False)
         if patient is None or not patient.pin_hash:
             raise RoomError("browser.pin_required")
@@ -103,7 +104,7 @@ class Rooms:
                     session.id,
                     utc_now() + ROOM_LIFETIME_SECONDS,
                     plan.duration_minutes,
-                    json.dumps(plan.exercises),
+                    json.dumps([spec.to_dict() for spec in specs]),
                 ),
             )
         return "-".join(code[i : i + 4] for i in range(0, 12, 4))
@@ -141,7 +142,11 @@ class Rooms:
             if updated.rowcount != 1:
                 raise RoomError("browser.in_use")
         return RoomAdmission(
-            session, code_hash, claim, row["duration_minutes"], tuple(json.loads(row["exercises"]))
+            session,
+            code_hash,
+            claim,
+            row["duration_minutes"],
+            specs_from_json(json.loads(row["exercises"])),
         )
 
     def heartbeat(self, admission: RoomAdmission) -> None:

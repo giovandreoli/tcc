@@ -16,6 +16,7 @@ from collections import deque
 from dataclasses import asdict, dataclass, field
 
 from spectra.detection.landmarks import HandLandmarks
+from spectra.gestures.click import PinchThresholds
 from spectra.gestures.features import (
     FingerStates,
     finger_extension_angles,
@@ -59,25 +60,35 @@ class CalibrationProfile:
     #: Fingers that fell back to defaults because open and closed looked alike.
     uncalibrated: tuple[str, ...] = ()
     samples_used: int = 0
+    #: Thumb-index "click" thresholds learned from this person, if calibrated.
+    pinch: PinchThresholds | None = None
 
     @property
     def is_calibrated(self) -> bool:
         return self.samples_used > 0
 
     def to_dict(self) -> dict:
-        return {
+        data = {
             "thresholds": [asdict(h) for h in self.thresholds],
             "uncalibrated": list(self.uncalibrated),
             "samples_used": self.samples_used,
         }
+        if self.pinch is not None:
+            data["pinch"] = self.pinch.to_dict()
+        return data
 
     @classmethod
     def from_dict(cls, data: dict) -> CalibrationProfile:
-        thresholds = tuple(Hysteresis(**entry) for entry in data["thresholds"])
+        thresholds = (
+            tuple(Hysteresis(**entry) for entry in data["thresholds"])
+            if data.get("thresholds")
+            else CalibrationProfile().thresholds
+        )
         return cls(
             thresholds=thresholds,
             uncalibrated=tuple(data.get("uncalibrated", ())),
             samples_used=int(data.get("samples_used", 0)),
+            pinch=PinchThresholds.from_dict(data["pinch"]) if data.get("pinch") else None,
         )
 
 

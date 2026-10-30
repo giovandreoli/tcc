@@ -12,11 +12,20 @@ from spectra.modes.free_draw import FreeDrawMode
 from spectra.modes.guided_draw import GuidedDrawMode
 from spectra.modes.menu import MenuMode
 from spectra.modes.physio import PhysioMode
+from spectra.modes.sterile import SterileViewerMode
 from spectra.ui.sound import SoundPlayer
 from tests.conftest import make_detection
 
 WIDTH, HEIGHT = 640, 480
-MODES = [MenuMode, FreeDrawMode, GuidedDrawMode, EduColorsMode, EduCountMode, PhysioMode]
+MODES = [
+    MenuMode,
+    FreeDrawMode,
+    GuidedDrawMode,
+    EduColorsMode,
+    EduCountMode,
+    PhysioMode,
+    SterileViewerMode,
+]
 
 POINT = (False, True, False, False, False)
 PAINT = (False, True, True, False, False)
@@ -73,6 +82,7 @@ class TestSmoke:
             AppMode.EDU_COLORS,
             AppMode.EDU_COUNT,
             AppMode.PHYSIO,
+            AppMode.STERILE,
         }
 
     def test_mode_titles_are_translated(self):

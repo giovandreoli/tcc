@@ -8,7 +8,8 @@ whole analysis can be exercised without a database and without a camera.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any
 
 from spectra.guided.scoring import TraceResult
 from spectra.metrics.accuracy import summarise_traces
@@ -29,6 +30,10 @@ class RunWindow:
     reps: int = 0
     target: int = 0
     rep_times: tuple[float, ...] = ()
+    #: Display title of a therapist-defined exercise; empty for built-in ones.
+    title: str = ""
+    #: Movement and parameters, kept with the run so a report shows what was asked.
+    details: dict[str, Any] = field(default_factory=dict)
 
     @property
     def duration(self) -> float:

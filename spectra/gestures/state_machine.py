@@ -172,7 +172,8 @@ class GestureEngine:
         smoothing_frames: int = 3,
     ) -> None:
         self.estimator = FingerStateEstimator(calibration, smoothing_frames)
-        self.pinch = PinchTracker()
+        pinch = calibration.pinch if calibration is not None else None
+        self.pinch = PinchTracker(pinch.on, pinch.off) if pinch else PinchTracker()
         self.machine = GestureStateMachine(profile)
         self.signal = HandSignal.absent()
 

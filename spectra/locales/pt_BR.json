@@ -27,7 +27,9 @@
     "guided_draw": "Desenho Guiado",
     "edu_colors": "Educação: Cores",
     "edu_count": "Educação: Contagem",
-    "physio": "Fisioterapia"
+    "physio": "Fisioterapia",
+    "sterile": "Ambiente estéril",
+    "usability": "Teste de usabilidade"
   },
   "menu": {
     "prompt": "Escolha o modo desejado com o indicador"
@@ -101,7 +103,13 @@
       "session_finished": "Sessão encerrada",
       "report_generated": "Relatório gerado",
       "report_exported": "Relatório exportado",
-      "backup_created": "Backup criado"
+      "backup_created": "Backup criado",
+      "document_added": "Documento adicionado",
+      "document_viewed": "Documento aberto",
+      "document_deleted": "Documento excluído",
+      "exercise_saved": "Exercício personalizado salvo",
+      "exercise_archived": "Exercício personalizado arquivado",
+      "gestures_saved": "Gestos aprendidos salvos"
     }
   },
   "panel": {
@@ -115,7 +123,10 @@
       "consent": "Consentimento (TCLE)",
       "session": "Nova sessão",
       "history": "Histórico e evolução",
-      "privacy": "Privacidade e dados"
+      "privacy": "Privacidade e dados",
+      "exercises": "Exercícios do paciente",
+      "documents": "Laudos e documentos",
+      "learning": "Aprendizado e pesquisa"
     },
     "login": {
       "subtitle": "Painel do fisioterapeuta",
@@ -169,7 +180,8 @@
       "consent_required": "Não é possível iniciar: o paciente não tem TCLE ativo.",
       "profile_warnings": "O perfil de gestos escolhido tem avisos:",
       "calibrated": "Calibração do paciente aplicada ({samples} amostras).",
-      "not_calibrated": "Sem calibração individual; serão usados os limiares padrão."
+      "not_calibrated": "Sem calibração individual; serão usados os limiares padrão.",
+      "exercises_help": "Inclui os exercícios básicos e os personalizados deste paciente (seção Exercícios do paciente)."
     },
     "history": {
       "empty": "Nenhuma sessão registrada.",
@@ -342,7 +354,10 @@
     "brush": "Pincel:{size}px",
     "pick_color": "Escolha a cor: aponte e mantenha",
     "legend_1": "1 dedo=apontar  2=pintar  3=apagar",
-    "legend_2": "mao aberta=cores  punho=pausar"
+    "legend_2": "mao aberta=cores  punho=pausar",
+    "finger_color": "{color} (dedo {finger})",
+    "depth": "Prof.: {scale}x · {motion}",
+    "legend_3": "polegar no medio/anelar/minimo=cor  aproximar=traco grosso"
   },
   "guided": {
     "title": "DESENHO GUIADO",
@@ -385,18 +400,18 @@
   },
   "browser": {
     "title": "SPECTRA — Sessão do paciente",
-    "local_only": "Etapa local: use este navegador no mesmo computador do painel. Acesso pela internet e videochamada ainda não estão disponíveis.",
-    "privacy": "A câmera é processada em memória pelo SPECTRA neste computador. Nenhum vídeo é gravado. Não há envio a serviços externos.",
+    "local_only": "O paciente pode entrar neste computador ou de casa, pelo link de internet gerado no painel.",
+    "privacy": "O reconhecimento da mão roda no seu navegador. Apenas 21 pontos da mão por quadro são enviados ao fisioterapeuta; nenhuma imagem ou vídeo sai do seu computador e nada é gravado.",
     "delivery": "Como realizar a sessão?",
-    "delivery_browser": "No navegador (local, sem comandos)",
+    "delivery_browser": "No navegador (neste computador ou de casa, pela internet)",
     "delivery_desktop": "Aplicativo Windows (modo anterior)",
     "code": "Código da sala",
     "pin": "PIN do paciente (4 dígitos)",
     "enter": "Entrar na sessão",
     "created": "Sala local criada. Abra a tela do paciente pelo botão abaixo.",
     "open_patient": "Abrir sessão do paciente",
-    "code_hint": "Código válido por 1 hora para entrada, com confirmação do PIN. Também é possível entrar em ?paciente=1 e digitar o código.",
-    "camera_hint": "Clique em Iniciar câmera e permita o acesso. Use Chrome ou Edge atualizado. A sessão só começa após chegar a primeira imagem. Para sair, pare a câmera ou finalize abaixo. Interrompa se sentir dor.",
+    "code_hint": "Código válido por 1 hora para entrada, com confirmação do PIN. Envie o código ou o link ao paciente por um canal privado (por exemplo, mensagem direta).",
+    "camera_hint": "Clique em Iniciar câmera e permita o acesso. Na primeira vez, o navegador baixa o modelo de reconhecimento (cerca de 20 MB). Mostre somente a mão da sessão, com o punho visível. Interrompa se sentir dor.",
     "camera_start": "Iniciar câmera",
     "camera_stop": "Parar câmera e encerrar",
     "select_device": "Selecionar câmera",
@@ -410,7 +425,7 @@
     "no_frames": "Nenhuma imagem chegou ao SPECTRA. A sala foi liberada sem salvar métricas. Confira a permissão da câmera e tente entrar novamente.",
     "waiting_camera": "Aguardando imagens da câmera. A sessão ainda não começou.",
     "camera_connecting": "Conectando a análise dos movimentos…",
-    "camera_connected": "Câmera ao vivo · análise dos movimentos em paralelo",
+    "camera_connected": "Câmera ao vivo · análise da mão no seu computador",
     "saved": "Sessão encerrada e métricas salvas. Consulte o histórico no painel.",
     "progress": "{exercise} — {reps} repetições no exercício atual",
     "invalid_plan": "Selecione ao menos um exercício de fisioterapia e uma duração entre 5 e 40 minutos.",
@@ -420,7 +435,12 @@
     "locked": "Acesso bloqueado por tentativas incorretas. Aguarde e consulte o fisioterapeuta.",
     "in_use": "Esta sala já está aberta em outro navegador. Feche a sessão anterior; se ela foi interrompida, aguarde 90 segundos.",
     "processing_error": "Falha ao processar a câmera ou perda de acesso à sala. Pare a câmera e consulte o terminal do painel para o diagnóstico.",
-    "save_error": "Não foi possível concluir o salvamento da sessão. Consulte o histórico e o diagnóstico no terminal antes de tentar novamente."
+    "save_error": "Não foi possível concluir o salvamento da sessão. Consulte o histórico e o diagnóstico no terminal antes de tentar novamente.",
+    "access_note": "Use Chrome, Edge ou Firefox atualizados. Seu vídeo é analisado no seu próprio computador e não é enviado.",
+    "camera_loading": "Preparando a câmera e o reconhecimento da mão…",
+    "camera_error": "Não foi possível iniciar a câmera ou o reconhecimento da mão. Feche outros programas que usam a câmera e tente de novo.",
+    "camera_unsupported": "Este navegador não permite usar a câmera nesta página. Use Chrome, Edge ou Firefox atualizados, pelo link https enviado pelo fisioterapeuta.",
+    "camera_fps": "{fps} quadros/s analisados"
   },
   "physio": {
     "title": "FISIOTERAPIA",
@@ -475,7 +495,10 @@
       "consent": "📝 Consentimento (TCLE)",
       "session": "🎯 Nova sessão",
       "history": "📈 Histórico e evolução",
-      "privacy": "🔒 Privacidade e dados"
+      "privacy": "🔒 Privacidade e dados",
+      "exercises": "🖐️ Exercícios do paciente",
+      "documents": "📄 Laudos e documentos",
+      "learning": "🧠 Aprendizado e pesquisa"
     },
     "empty": {
       "patients": "Ainda não há pacientes por aqui. Cadastre o primeiro para começar.",
@@ -541,7 +564,12 @@
         "keep_going": "Ótimo ritmo! Faça movimentos lentos e completos, sem forçar.",
         "halfway": "Mais da metade! Respire e continue no seu ritmo.",
         "exercise_done": "Exercício concluído! Avance para o próximo quando estiver pronto(a)."
-      }
+      },
+      "reps_goal": "Meta: {reps} repetições",
+      "learn_first": "Treinar os gestos antes (opcional)",
+      "learn_help": "Uma trilha curta que ensina os gestos com a câmera. Nada é gravado.",
+      "learn_intro": "Vamos praticar os gestos? Siga as lições ao lado. Você pode pular qualquer uma.",
+      "learn_back": "Voltar para a preparação"
     },
     "pain": {
       "question": "Como está sua dor agora?",
@@ -576,12 +604,393 @@
       "remaining": "restantes",
       "exercise": "Exercício {current}/{total}",
       "reps": "Repetições",
-      "total": "{total} no total"
+      "total": "{total} no total",
+      "hold": "Segure a posição…"
     },
     "summary": {
       "time": "Tempo ativo",
       "reps": "Repetições",
       "exercises": "Exercícios"
+    }
+  },
+  "remote": {
+    "title": "🌐 Acesso pela internet (paciente em casa)",
+    "explain": "Gera um endereço https gratuito (Cloudflare Tunnel, sem conta) para o paciente entrar de casa. Por esse endereço só abre a página do paciente, que exige código da sala e PIN. O painel continua acessível apenas neste computador.",
+    "missing": "O programa gratuito cloudflared ainda não está neste computador. Ele é baixado do repositório oficial da Cloudflare no GitHub (cerca de 40 MB).",
+    "download": "Baixar cloudflared",
+    "downloading": "Baixando o cloudflared…",
+    "start": "Ativar link pela internet",
+    "starting": "Criando o link seguro… isso leva alguns segundos.",
+    "active": "Link ativo: {url}",
+    "active_hint": "O link funciona enquanto o painel e este computador estiverem ligados. Ao reiniciar, um novo endereço é gerado.",
+    "stop": "Desativar link",
+    "patient_link": "Link para o paciente (abre direto na sala):",
+    "patient_link_hint": "Envie por um canal privado. O paciente ainda precisa do PIN de 4 dígitos.",
+    "error": {
+      "platform": "Sistema operacional não suportado para o cloudflared.",
+      "download": "Não foi possível baixar o cloudflared. Verifique a internet ou instale com: winget install Cloudflare.cloudflared",
+      "start": "O cloudflared não conseguiu criar o link. Verifique a conexão com a internet e tente novamente.",
+      "timeout": "O link demorou demais para ser criado. Tente novamente em instantes."
+    }
+  },
+  "exercise": {
+    "movement": {
+      "open_close": "Abrir e fechar a mão",
+      "pinch": "Pinça (polegar com um dedo)",
+      "finger_wave": "Onda de dedos",
+      "finger_lift": "Levantar um dedo",
+      "thumb_opposition": "Oposição do polegar (todos os dedos)"
+    },
+    "movement_help": {
+      "open_close": "Conta uma repetição a cada mão aberta seguida de punho fechado. Opcional: manter o punho fechado por alguns segundos.",
+      "pinch": "Conta cada toque da ponta do polegar na ponta do dedo escolhido. As distâncias são relativas ao tamanho da palma, então funcionam perto ou longe da câmera.",
+      "finger_wave": "Levantar e abaixar indicador, médio, anelar e mínimo em sequência. Uma sequência completa é uma repetição.",
+      "finger_lift": "Levantar e abaixar um dedo escolhido. No modo isolado, os outros dedos precisam ficar dobrados.",
+      "thumb_opposition": "Tocar o polegar no indicador, médio, anelar e mínimo, nessa ordem. A sequência completa é uma repetição."
+    },
+    "summary": {
+      "reps": "{reps} repetições",
+      "hold": "segurar {seconds} s",
+      "isolated": "dedo isolado"
+    },
+    "tolerance": {
+      "wide": "Tolerância ampla",
+      "normal": "Tolerância padrão",
+      "strict": "Contato preciso"
+    },
+    "direction": {
+      "forward": "Do indicador ao mínimo",
+      "backward": "Do mínimo ao indicador"
+    },
+    "error": {
+      "title": "Dê um nome ao exercício (3 a 60 caracteres).",
+      "instructions": "Use no máximo 3 linhas de instrução, com até 140 caracteres cada.",
+      "reps": "A meta deve ficar entre 1 e 30 repetições.",
+      "hold": "O tempo de sustentação deve ficar entre 0 e 5 segundos.",
+      "finger": "Escolha um dedo válido.",
+      "tolerance": "Escolha uma tolerância válida.",
+      "direction": "Escolha uma direção válida.",
+      "patient": "Paciente não encontrado."
+    },
+    "steps": {
+      "open_close_1": "1. Abra bem a mão, com os dedos esticados",
+      "open_close_2": "2. Feche a mão em punho, sem forçar",
+      "pinch_1": "1. Encoste a ponta do polegar na ponta do {finger}",
+      "pinch_2": "2. Afaste os dedos e repita",
+      "finger_wave_1": "1. Levante um dedo de cada vez, na ordem indicada",
+      "finger_wave_2": "2. Abaixe cada dedo antes de levantar o próximo",
+      "finger_lift_1": "1. Levante o {finger}",
+      "finger_lift_2": "2. Abaixe o {finger} e repita",
+      "thumb_opposition_1": "1. Toque o polegar no indicador, médio, anelar e mínimo",
+      "thumb_opposition_2": "2. Afaste o polegar entre um toque e outro",
+      "hold": "3. Segure a posição por {seconds} s antes de soltar",
+      "gentle": "3. Movimentos lentos, sem forçar. Pare se sentir dor"
+    },
+    "cue": {
+      "open_hand": "Abra bem a mão.",
+      "close_hand": "Agora feche a mão em punho.",
+      "hold": "Segure assim…",
+      "touch": "Toque o polegar no {finger}.",
+      "release": "Agora solte e afaste os dedos.",
+      "lift": "Levante o {finger}.",
+      "lift_only": "Levante só o {finger}, com os outros dobrados.",
+      "lower": "Agora abaixe o {finger}.",
+      "show_hand": "Mostre a mão para a câmera.",
+      "done": "Meta alcançada! Avance para o próximo exercício quando quiser."
+    },
+    "panel": {
+      "intro": "Monte exercícios sob medida a partir de movimentos que o SPECTRA já reconhece com segurança. Teste com a sua câmera antes de usar na sessão.",
+      "list": "Exercícios personalizados deste paciente",
+      "empty": "Nenhum exercício personalizado ainda. Os exercícios básicos continuam disponíveis.",
+      "archive": "Arquivar",
+      "new": "➕ Novo exercício personalizado",
+      "save": "Salvar exercício",
+      "saved": "Exercício \"{title}\" salvo. Ele já aparece em Nova sessão.",
+      "test": "Testar um exercício com a câmera",
+      "test_hint": "Faça o movimento você mesmo(a) e confira a contagem antes de prescrever. Nada é gravado.",
+      "test_choose": "Exercício para testar",
+      "test_reset": "Zerar teste",
+      "test_frames": "{frames} quadros analisados"
+    },
+    "field": {
+      "movement": "Movimento base",
+      "title": "Nome do exercício",
+      "reps": "Meta de repetições",
+      "finger": "Dedo",
+      "tolerance": "Distância para contar o toque",
+      "tolerance_help": "Ampla conta toques mais distantes (pouca amplitude). Contato preciso exige encostar de fato.",
+      "direction": "Ordem dos dedos",
+      "isolated": "Exigir os outros dedos dobrados",
+      "isolated_help": "Torna o exercício mais difícil: treina a independência do dedo escolhido.",
+      "hold": "Segurar a posição (segundos)",
+      "instructions": "Instruções para o paciente (opcional, uma por linha)",
+      "instructions_help": "Se ficar vazio, o SPECTRA gera instruções a partir do movimento e dos parâmetros."
+    }
+  },
+  "document": {
+    "privacy": "Laudos e anexos ficam criptografados neste computador, entram no backup criptografado e são excluídos junto com o paciente. Todo acesso fica no log de auditoria.",
+    "tab": {
+      "write": "✍️ Escrever laudo",
+      "upload": "📎 Anexar arquivo"
+    },
+    "field": {
+      "category": "Tipo de documento",
+      "title": "Título",
+      "issued_on": "Data do documento",
+      "body": "Texto do laudo",
+      "file": "Arquivo (PDF, PNG ou JPG, até 10 MB)",
+      "notes": "Observações (opcional)",
+      "author": "Responsável",
+      "signature": "Assinatura do(a) fisioterapeuta"
+    },
+    "category": {
+      "physio_report": "Laudo fisioterapêutico",
+      "medical_report": "Laudo médico",
+      "exam": "Exame",
+      "referral": "Encaminhamento",
+      "other": "Outro"
+    },
+    "default_title": "Laudo fisioterapêutico",
+    "body_help": "Ex.: avaliação, diagnóstico cinético-funcional, objetivos, conduta e evolução. Separe parágrafos com uma linha em branco.",
+    "file_help": "O tipo é conferido pelo conteúdo do arquivo, não pela extensão.",
+    "save": "Salvar laudo",
+    "attach": "Anexar documento",
+    "saved": "Documento salvo no prontuário do paciente.",
+    "list": "Documentos do paciente",
+    "empty": "Nenhum laudo ou documento para este paciente.",
+    "prepare": "Abrir para download",
+    "download": "Baixar",
+    "delete": "Excluir",
+    "confirm_delete": "Clique em Excluir novamente para confirmar. Esta ação não pode ser desfeita.",
+    "file_info": "Arquivo: {name} ({kb} KB)",
+    "pdf_notice": "Documento gerado pelo SPECTRA, protótipo acadêmico. Não substitui documento assinado conforme as normas do conselho profissional.",
+    "error": {
+      "category": "Escolha um tipo de documento válido.",
+      "title": "Informe um título com 3 a 120 caracteres.",
+      "date_future": "A data do documento não pode estar no futuro.",
+      "empty": "Escreva o laudo ou anexe um arquivo.",
+      "body_long": "O texto passou de 20.000 caracteres.",
+      "too_large": "O arquivo passa de 10 MB.",
+      "type": "Formato não aceito. Envie PDF, PNG ou JPG.",
+      "patient": "Paciente não encontrado."
+    }
+  },
+  "depth": {
+    "motion": {
+      "steady": "parada",
+      "translation": "aproximação",
+      "rotation": "rotação"
+    }
+  },
+  "domain": {
+    "command": {
+      "select": "Selecionar",
+      "next": "Próxima",
+      "previous": "Anterior",
+      "zoom_in": "Ampliar",
+      "zoom_out": "Reduzir",
+      "reset_view": "Restaurar zoom",
+      "lock": "Travar/destravar",
+      "menu": "Menu",
+      "pause": "Pausar"
+    },
+    "locked": "TRAVADO - feche a mao para destravar",
+    "unlocked": "Destravado"
+  },
+  "sterile": {
+    "title": "AMBIENTE ESTERIL - sem toque",
+    "status": "Imagem {index}/{total} - zoom {zoom}x",
+    "legend_1": "2 dedos = proxima   3 dedos = anterior",
+    "legend_2": "aproximar = ampliar   afastar = reduzir",
+    "legend_3": "mao aberta = zoom normal",
+    "legend_4": "punho = travar/destravar",
+    "placeholder": "imagem sintetica de demonstracao"
+  },
+  "usability": {
+    "task_title": "TESTE: selecione os alvos com a pinca",
+    "task_progress": "Alvos: {done}/{total}",
+    "task_hint": "Aponte com o indicador e encoste o polegar no indicador para clicar. ESC encerra.",
+    "task_done": "Tarefa concluida! Obrigado.",
+    "saved": "Resultado do teste salvo para o participante {code}.",
+    "sus_band": {
+      "excellent": "Excelente",
+      "good": "Bom",
+      "ok": "Aceitável",
+      "poor": "Ruim",
+      "awful": "Inaceitável"
+    },
+    "intro": "Registre os testes com usuários do TCC. Os participantes são identificados só por um código (P01, P02…), nunca por nome ou CPF.",
+    "protocol_title": "Protocolo sugerido (cerca de 20 minutos por participante)",
+    "protocol_1": "Cadastre o participante abaixo com o código e confirme que o TCLE da pesquisa foi assinado.",
+    "protocol_2": "Na aba Trilha de gestos, o participante faz as 8 lições; escolha o código dele e salve o resultado (mede a aprendizagem).",
+    "protocol_3": "Rode a tarefa de apontar duas vezes, uma com cada filtro, na ordem indicada (o contrabalanceamento é automático).",
+    "protocol_4": "Ao final, aplique o questionário SUS abaixo.",
+    "protocol_5": "Opcional: peça para o participante desenhar no modo Pintura Livre e navegar no modo Ambiente estéril, anotando observações.",
+    "protocol_6": "Exporte o CSV para a análise do capítulo de resultados. Com 2 ou mais participantes, a comparação estatística aparece aqui.",
+    "new_participant": "Novo participante",
+    "code": "Código do participante",
+    "consent": "O participante assinou o TCLE da pesquisa",
+    "notes": "Observações (opcional)",
+    "notes_help": "Ex.: destro, usa óculos, iluminação. Não escreva nome nem dados que identifiquem a pessoa.",
+    "add": "Cadastrar participante",
+    "code_invalid": "Use apenas letras e números no código (ex.: P01).",
+    "consent_required": "Sem TCLE assinado não é possível registrar o participante.",
+    "participant": "Participante",
+    "run_title": "Tarefa de apontar (no computador com a webcam)",
+    "run_hint": "Execute os dois comandos, nesta ordem, na pasta do projeto. Cada um abre a tarefa e salva o resultado ao terminar.",
+    "sus_title": "Questionário SUS (System Usability Scale)",
+    "sus_hint": "Leia cada afirmação para o participante e registre o quanto ele concorda.",
+    "sus": {
+      "1": "Eu acho que gostaria de usar este sistema com frequência.",
+      "2": "Eu achei o sistema desnecessariamente complexo.",
+      "3": "Eu achei o sistema fácil de usar.",
+      "4": "Eu acho que precisaria de ajuda de uma pessoa técnica para usar o sistema.",
+      "5": "Eu achei que as funções do sistema estavam bem integradas.",
+      "6": "Eu achei que havia muita inconsistência no sistema.",
+      "7": "Eu imagino que a maioria das pessoas aprenderia a usar este sistema rapidamente.",
+      "8": "Eu achei o sistema muito complicado de usar.",
+      "9": "Eu me senti muito confiante usando o sistema.",
+      "10": "Eu precisei aprender muitas coisas antes de conseguir usar o sistema."
+    },
+    "likert": {
+      "1": "Discordo totalmente",
+      "2": "Discordo",
+      "3": "Neutro",
+      "4": "Concordo",
+      "5": "Concordo totalmente"
+    },
+    "sus_save": "Salvar respostas do SUS",
+    "sus_saved": "SUS registrado: {score} pontos.",
+    "results_title": "Resultados",
+    "sus_mean": "SUS médio",
+    "metric": "Métrica",
+    "metric_mt": "Tempo de movimento (s)",
+    "metric_tp": "Throughput (bits/s)",
+    "metric_err": "Taxa de erro",
+    "difference": "Diferença média (Kalman − exponencial)",
+    "comparison_title": "Kalman × média exponencial (teste t pareado)",
+    "comparison_hint": "p < 0,05 indica diferença estatisticamente significativa; dz é o tamanho do efeito (0,2 pequeno, 0,5 médio, 0,8 grande). Com poucos participantes, interprete com cautela.",
+    "csv": "Baixar resultados (CSV)",
+    "delete": "Excluir participante {code}",
+    "confirm_delete": "Clique novamente para confirmar a exclusão deste participante e dos resultados dele."
+  },
+  "learning": {
+    "intro": "Funções de aprendizado do SPECTRA: a pessoa aprende os gestos, o sistema aprende os gestos da pessoa, e os testes medem os resultados para o TCC.",
+    "tab": {
+      "path": "🎓 Trilha de gestos",
+      "gestures": "🧠 Gestos personalizados (IA)",
+      "click": "🤏 Calibrar clique",
+      "tests": "🧪 Testes com usuários",
+      "evaluation": "📊 Avaliação dos algoritmos"
+    },
+    "path": {
+      "intro": "Oito lições curtas ensinam a interface sem toque, uma ideia por vez. Cada lição é conferida automaticamente pela câmera e o tempo vira medida de aprendizagem.",
+      "step": "Lição {current} de {total}",
+      "done_title": "Trilha concluída!",
+      "done": "Parabéns! Você aprendeu todos os gestos e fez {stars} estrelas.",
+      "count": "{count} de {target}",
+      "depth": "Profundidade: {scale}x · {motion} · inclinação {tilt}°",
+      "skip": "Pular esta lição",
+      "results": "Suas lições",
+      "skipped": "pulada",
+      "participant": "Salvar como teste do participante (opcional)",
+      "no_participant": "Não salvar",
+      "restart": "Recomeçar a trilha",
+      "save": "Salvar resultado no teste",
+      "saved": "Resultado da trilha salvo para {code}."
+    },
+    "lesson": {
+      "show_hand": {
+        "title": "Mostre a mão",
+        "how": "Mostre a palma da mão para a câmera, com o punho dentro da imagem."
+      },
+      "open_hand": {
+        "title": "Abra a mão",
+        "how": "Abra bem a mão, com todos os dedos esticados, e segure."
+      },
+      "fist": {
+        "title": "Feche a mão",
+        "how": "Feche a mão em punho, sem forçar, e segure."
+      },
+      "point": {
+        "title": "Aponte",
+        "how": "Deixe só o indicador esticado, como quem aponta. É assim que se move o cursor."
+      },
+      "click": {
+        "title": "Clique no ar",
+        "how": "Encoste a ponta do polegar na ponta do indicador e solte. Faça 3 cliques."
+      },
+      "finger_colors": {
+        "title": "Cores nos dedos",
+        "how": "Encoste o polegar no médio, depois no anelar e no mínimo. Cada dedo escolhe uma cor no desenho."
+      },
+      "depth": {
+        "title": "Aproxime e afaste",
+        "how": "Leve a mão para mais perto da câmera e depois volte. No desenho, isso deixa o traço mais grosso."
+      },
+      "rotate": {
+        "title": "Gire sem aproximar",
+        "how": "Gire a palma devagar, como quem vira uma página, sem aproximar a mão. O sistema deve perceber que é rotação, não aproximação."
+      }
+    },
+    "ai": {
+      "intro": "Ensine gestos novos ao SPECTRA: dê um nome, grave alguns segundos de exemplos e treine. O classificador aprende com a mão desta pessoa, sem GPU e sem enviar nada para fora.",
+      "label": "Nome do gesto (ex.: joinha, próxima, OK)",
+      "record": "Gravar exemplos (3 s)",
+      "remove_label": "Gesto para remover",
+      "remove": "Remover exemplos deste gesto",
+      "train_title": "Treinar e avaliar",
+      "train_hint": "Grave ao menos 2 gestos, com 5 exemplos ou mais cada. Varie levemente a posição da mão ao gravar.",
+      "train": "Treinar modelo",
+      "bind_title": "O que cada gesto faz",
+      "bind_hint": "Associe gestos a comandos. No aplicativo, o modo Ambiente estéril obedece a esses gestos.",
+      "unbound": "Sem comando",
+      "live": "Testar ao vivo",
+      "save": "Salvar no prontuário e enviar ao aplicativo",
+      "saved": "Gestos salvos e exportados para o aplicativo ({path}).",
+      "get_ready": "Prepare o gesto \"{label}\"…",
+      "recording": "Gravando \"{label}\" — mantenha o gesto e mexa levemente a mão.",
+      "prediction": "Gesto reconhecido",
+      "unknown": "desconhecido",
+      "confidence": "confiança {value}",
+      "examples": "Exemplos gravados:",
+      "accuracy": "Acurácia (validação cruzada)",
+      "rejected": "Rejeitados",
+      "classes": "Gestos",
+      "loo_hint": "Validação leave-one-out: cada exemplo é classificado por um modelo treinado com todos os outros. Linhas = gesto real, colunas = gesto previsto."
+    },
+    "error": {
+      "label": "Dê um nome de 1 a 40 caracteres ao gesto.",
+      "features": "Exemplo inválido.",
+      "labels": "Grave pelo menos 2 gestos diferentes.",
+      "samples": "Cada gesto precisa de pelo menos 5 exemplos.",
+      "untrained": "Treine o modelo antes de usá-lo.",
+      "version": "Modelo salvo em versão incompatível."
+    },
+    "click": {
+      "intro": "O clique é a distância entre as pontas do polegar e do indicador. Grave a mão desta pessoa com os dedos afastados e fazendo pinça: os limites passam a respeitar a amplitude dela.",
+      "apart": "Gravar dedos afastados (2 s)",
+      "pinch": "Gravar pinça (2 s)",
+      "current": "Calibração atual: clique abaixo de {on}, solta acima de {off}.",
+      "save": "Calcular e salvar calibração",
+      "too_close": "Os dois gestos ficaram parecidos demais. Grave de novo, afastando bem os dedos na primeira gravação.",
+      "saved": "Clique calibrado: pressiona abaixo de {on} e solta acima de {off} (relativo ao tamanho da palma).",
+      "capturing_apart": "Gravando: mantenha polegar e indicador afastados.",
+      "capturing_pinch": "Gravando: encoste o polegar no indicador.",
+      "ratio": "Distância polegar–indicador / palma",
+      "samples": "Quadros gravados — afastados: {apart} · pinça: {pinch}"
+    },
+    "eval": {
+      "intro": "Compara os algoritmos com dados sintéticos de verdade conhecida (mão 3D projetada por uma câmera virtual). Os números são reproduzíveis e entram no capítulo de resultados.",
+      "run": "Executar avaliação",
+      "cli": "Também disponível no terminal: python -m spectra.evaluation (gera as tabelas em Markdown).",
+      "running": "Calculando…",
+      "filters_title": "Filtro de Kalman × média exponencial × sem filtro",
+      "rmse": "Erro em relação ao traço verdadeiro (RMSE, pixels; menor é melhor)",
+      "filters_hint": "Jitter = tremor do cursor quadro a quadro. A média exponencial treme pouco mas atrasa muito (RMSE alto); o Kalman acompanha o traço e reduz o tremor.",
+      "depth_title": "Estimativa de profundidade (eixo Z)",
+      "depth_error": "Erro médio da distância estimada (menor é melhor)",
+      "depth_hint": "Só a área confunde rotação com aproximação. A razão de aspecto corrige rotações nos dois eixos; a distância pulso–dedo médio corrige a pronação/supinação, mas não a flexão do punho."
     }
   }
 }

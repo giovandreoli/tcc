@@ -66,6 +66,17 @@ class ReportExercise:
     reps: int
     target: int
     duration_seconds: float
+    #: Title of a therapist-defined exercise; built-in ones are translated by key.
+    title: str = ""
+
+    def label(self, catalog=None) -> str:
+        from spectra.i18n import active_catalog
+
+        c = catalog or active_catalog()
+        if self.title:
+            return self.title
+        key = "physio.exercise." + self.name
+        return c.t(key) if key in c else c.t("report.exercise.guided")
 
     @property
     def pace_rpm(self) -> float:
@@ -239,7 +250,14 @@ def build_session_report(
         gesture_profile=session.gesture_profile_name,
         difficulty=session.difficulty,
         exercises=[
-            ReportExercise(run.name, run.kind, run.reps, run.target, run.duration)
+            ReportExercise(
+                run.name,
+                run.kind,
+                run.reps,
+                run.target,
+                run.duration,
+                str(run.payload.get("title") or ""),
+            )
             for run in db.list_exercise_runs(session_id)
         ],
         metrics=_metric_rows(summaries),

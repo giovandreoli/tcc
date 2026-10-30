@@ -74,14 +74,7 @@ class TestArgumentParsing:
 
 class TestModeRouting:
     def test_every_mode_has_a_factory(self):
-        assert set(MODE_FACTORIES) == {
-            AppMode.MENU,
-            AppMode.FREE_DRAW,
-            AppMode.GUIDED_DRAW,
-            AppMode.EDU_COLORS,
-            AppMode.EDU_COUNT,
-            AppMode.PHYSIO,
-        }
+        assert set(MODE_FACTORIES) == set(AppMode)
 
     def test_the_app_starts_on_the_menu(self, app):
         assert app.mode is AppMode.MENU

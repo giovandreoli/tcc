@@ -193,6 +193,32 @@ class Sample:
     payload: dict = field(default_factory=dict)
 
 
+@dataclass
+class PatientDocument:
+    """A clinical document in the patient's record: an uploaded file or a written report.
+
+    Title, body and original filename are encrypted at rest; an uploaded file is stored
+    encrypted on disk, never inside the database and never under its original name.
+    """
+
+    id: str = field(default_factory=new_id)
+    patient_id: str = ""
+    therapist_id: str | None = None
+    category: str = "physio_report"
+    title: str = ""
+    issued_on: date | None = None
+    body: str = ""
+    filename: str = ""
+    media_type: str = ""
+    size: int = 0
+    sha256: str = ""
+    created_at: float = field(default_factory=utc_now)
+
+    @property
+    def has_file(self) -> bool:
+        return bool(self.media_type)
+
+
 class AuditAction(Enum):
     """Auditable actions; values double as i18n keys under ``audit.action.``."""
 
@@ -212,6 +238,12 @@ class AuditAction(Enum):
     REPORT_GENERATED = "report_generated"
     REPORT_EXPORTED = "report_exported"
     BACKUP_CREATED = "backup_created"
+    DOCUMENT_ADDED = "document_added"
+    DOCUMENT_VIEWED = "document_viewed"
+    DOCUMENT_DELETED = "document_deleted"
+    EXERCISE_SAVED = "exercise_saved"
+    EXERCISE_ARCHIVED = "exercise_archived"
+    GESTURES_SAVED = "gestures_saved"
 
 
 @dataclass

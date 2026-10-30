@@ -390,11 +390,11 @@ them; that is stated in the file itself rather than left implicit.
 **D-081 — `mkdocs.yaml` added but the build is not wired into CI.**
 The author's other repositories use MkDocs, and the four documents are already written in
 Markdown. There is no CI in this repository to publish it from, so it stays a local
-convenience.
+convenience. *Superseded by D-105.*
 
-**D-082 — Screenshots are placeholders with explicit paths.**
-`docs/images/` exists with the exact filenames the README expects, so adding the real captures
-before submission is a drop-in, not an edit of the README.
+**D-082 — Do not fabricate screenshots or expose participant data.**
+The README marks real screenshots as a final-submission task. Capture them from a demonstration
+with fictitious data and no identifiable patient details.
 
 **D-083 — The camera, the MediaPipe call and the Streamlit script are not unit tested.**
 All three are thin wrappers over a third-party API; testing them would test the mock. They are
@@ -406,12 +406,13 @@ with the pure-logic packages (`gestures`, `metrics`, `storage`, `guided`, `repor
 
 **D-084 — Deliver the local browser workflow before internet deployment and video calls.**
 The user explicitly chose to validate locally first. Room links must not imply that a
-localhost server is accessible from a patient's home.
+localhost server is accessible from a patient's home. *Superseded by D-098 and D-099.*
 
 **D-085 — Reuse the exercise engine with `streamlit-webrtc==0.63.11`.**
 This release supports the installed Streamlit 1.50 and avoids a second exercise implementation.
 Video is processed in memory by the same local Python process, not by browser-side inference.
 No audio or external ICE servers are enabled; remote inference and calls remain future work.
+*Superseded by D-098: inference moved to the patient's browser and WebRTC was removed.*
 
 **D-086 — Store expiring room-code digests and exclusive claims in SQLite.**
 A random 12-character code plus the patient PIN admits one browser. Codes expire after one
@@ -483,3 +484,128 @@ inference throughput; repetition counting and metrics still use real analyzed sa
 The former pre-inference horizontal flip inverted the reported treatment hand in practice.
 It is removed: only the preview is mirrored with CSS. Tests cover unmodified input pixels,
 both treatment hands, SENDONLY wiring, repetition counting, rest prompts and finalization.
+*D-095 to D-097 are superseded by D-098; the mirror-only-the-preview rule still holds.*
+
+## Remote sessions, custom exercises and clinical records
+
+**D-098 — Run hand tracking in the patient's browser; send landmarks, not video.**
+Uploading webcam video from a patient's home would need a TURN relay (paid or self-hosted),
+upstream bandwidth the patient may not have, and would put video of a person on the network.
+The MediaPipe Tasks Vision web build (Apache-2.0, 1.2.0) runs the same `hand_landmarker.task`
+model in the browser through WebAssembly; only 21 normalised points per analysed frame are sent
+to the panel, in batches of about 0.4 s. The bundle, the SIMD WebAssembly binary and the model
+are served by the component itself (no CDN), so the page also works offline on the same
+computer. Batches are untrusted input: size, types, ranges and labels are validated and a
+malformed batch is rejected whole (`browser/frames.py`). Delivery is acknowledged: the browser
+keeps unconfirmed frames and resends them; the server ignores timestamps it already processed,
+so a batch lost during a Streamlit rerun is not lost and none is counted twice.
+`streamlit-webrtc`, `aiortc` and `av` are no longer needed. Measured on the author's machine:
+model load under 1 s, about 20 analysed frames per second, about 18 per second reaching Python
+through a reverse proxy. The video preview is still mirrored only in CSS.
+
+**D-099 — Free internet access through a Cloudflare quick tunnel; panel stays local-only.**
+`cloudflared tunnel --url http://localhost:<port>` gives a random `https://*.trycloudflare.com`
+address with no account, no cost and no router configuration. HTTPS is required anyway for
+`getUserMedia` outside `localhost`. The panel keeps listening on localhost; `cloudflared` is a
+local client. Every request is classified from the WebSocket handshake headers: a proxy header
+(`cf-ray`, `cf-connecting-ip`, `x-forwarded-*`), a non-local `Host` (cloudflared preserves it
+by default) or a non-local `Origin` (set by the browser, not rewritable by a proxy) makes it
+remote, and remote requests only ever receive the patient page, even when the browser session
+carries a therapist login. Unknown context fails closed. Verified with a reverse proxy that
+emulates cloudflared without adding Cloudflare headers. Quick tunnels have no uptime guarantee;
+the README says so and points to named tunnels for continuous use.
+
+**D-100 — Custom exercises are parameterised validated movements, not free-form rules.**
+The therapist needs exercises for each patient, and they must count reliably. Letting a
+therapist define arbitrary landmark rules would produce exercises nobody has tested. Instead
+there are five movements, each with a unit-tested detector (open/close, pinch with a chosen
+finger, finger wave in either order, single-finger lift optionally isolated, sequential thumb
+opposition), and bounded parameters: 1–30 repetitions, 0–5 s hold, finger, contact tolerance.
+Out-of-range values are rejected by `ExerciseSpec.validate()` before saving. A "test with the
+camera" area in the panel lets the therapist try an exercise before prescribing it.
+
+**D-101 — Finger-specific contacts require the target to be the nearest fingertip.**
+Adjacent fingertips sit roughly 0.25 palm-lengths apart, inside any useful contact threshold,
+so a distance test alone counted a touch on the middle finger as a pinch with the index. A
+contact now needs the thumb within the threshold **and** closer to the target than to any other
+fingertip. Distances are palm-normalised and use hysteresis (on/off) plus a 0.3 s cooldown, so
+they are independent of camera distance and robust to landmark jitter.
+
+**D-102 — Rooms keep a snapshot of the exercise specs.**
+A room stores the full JSON of each chosen exercise, not just its id. Editing or archiving an
+exercise therefore never changes a session already scheduled, and runs store the title and
+parameters in their payload so reports show exactly what was prescribed. Legacy rooms holding
+plain built-in keys still load.
+
+**D-103 — Clinical documents are encrypted files outside the database, named by UUID.**
+Uploaded reports (PDF, PNG, JPEG up to 10 MB, type checked by content signature) are encrypted
+with the same Fernet key and stored as `<data_dir>/documents/<uuid>.bin`; title, text and the
+original filename are encrypted columns. A SHA-256 of the plaintext detects tampering on read.
+Every open, download and deletion is audited; documents are included in the encrypted backup
+and in the LGPD export, and erased on anonymisation or deletion because they identify the
+person. Written reports can be rendered to PDF for printing, with a notice that the prototype
+does not replace a document signed under professional council rules.
+
+**D-104 — Escape Markdown in names, masked CPFs and therapist-written text.**
+Streamlit renders labels as Markdown, so the masked CPF `***.982.247-**` turned into bold and
+italic text on the home monitor. Text that comes from data is now escaped before display.
+
+**D-105 — Continuous integration on Windows and Linux; documentation on GitHub Pages.**
+GitHub Actions runs format, lint and the full test suite on Python 3.10, 3.11 and 3.12 on both
+operating systems, matching the supported range. MkDocs builds the documentation with warnings
+as errors on pull requests; only `main` deploys to GitHub Pages. Patient data never goes to
+either service: the database stays on the therapist's computer.
+
+## Learning features (thesis proposal alignment)
+
+**D-106 — Kalman filter (constant velocity) is the default pointer filter.**
+The proposal names it, and the evaluation confirms the reason: the exponential average removes
+jitter only by lagging (RMSE 14.7 px on a moving stroke vs 5.9 px raw), while the Kalman filter
+keeps jitter near the average and has the lowest error (4.0 px). Two independent 2-state
+filters, plain Python, `dt` from timestamps. `σm = 8 px`, `σa = 900 px/s²` were chosen by a
+sweep (docs/learning.md). The exponential and raw filters stay selectable for the user tests.
+
+**D-107 — Depth from the palm polygon, with the aspect ratio as the default disambiguator.**
+Both complementary metrics in the proposal were implemented and measured on a synthetic 3-D
+hand: area alone errs up to 52% under rotation; the wrist–middle length fixes roll but fails on
+pitch (51%); the aspect ratio measured along the hand's own axis fixes both (≈2% mean error),
+and also yields the tilt to correct the area. The palm polygon is used instead of the whole
+hand because finger flexion does not change it.
+
+**D-108 — The pinch click is available on every button, disabled when the profile pinches.**
+Dwell selection remains (accessibility); the pinch is the fast path from the proposal. It is
+turned off automatically when the gesture profile already binds the pinch (simplified profile
+paints with it). Per-user thresholds are learned from two short recordings.
+
+**D-109 — Thumb-to-finger contacts choose colours; the index is reserved for the click.**
+Middle, ring and pinky map to red, green and blue by default (configurable in `config.json`).
+Selection also works inside the open-hand colour menu, where the posture naturally occurs.
+
+**D-110 — Gestures become tokens; domains map tokens to commands.**
+This is the "modular and parametrisable" architecture of the proposal: rehabilitation, sterile
+environment and drawing are presets loadable from JSON, and learned gestures plug in as
+`ml:<label>` tokens. The sterile profile has a lock gesture because accidental commands are the
+main risk in an operating room. Depth tokens ignore rotations, so turning the hand never zooms.
+
+**D-111 — k-NN with rejection for user-taught gestures, evaluated by leave-one-out.**
+Tens of examples per gesture, instant training, explainable decisions and no new dependency.
+Features are invariant to position, scale, in-plane rotation and side. Unknown poses are
+rejected using a threshold learned from in-class neighbour distances. Only the 45 normalised
+numbers are stored, per patient, in the database (LGPD export and cascade delete).
+
+**D-112 — A gesture learning path doubles as the learnability measure.**
+Eight automatically checked lessons teach the interface, including turning the hand *without*
+approaching to make the depth disambiguation visible. Lesson times are saved per anonymous
+participant. Depth lessons capture their reference only after 0.6 s, so frames still moving
+from the previous lesson do not corrupt it (found by the tests).
+
+**D-113 — User tests: ISO 9241-9 pointing, SUS, counterbalanced within-subject design.**
+Each participant uses both filters (odd codes start with Kalman), so the comparison is paired.
+Participants are identified by codes only; a signed research TCLE is required to register one.
+The paired t-test p-value is computed with the regularised incomplete beta function, validated
+against reference values, to avoid adding SciPy.
+
+**D-114 — Anchor the browser clock on the newest frame of the first batch.**
+Anchoring on the first frame clamped the rest of the first batch to "now", squeezing about
+0.4 s of motion into milliseconds. Found while testing the learning path; fixed for exercise
+sessions too.

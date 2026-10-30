@@ -20,12 +20,17 @@ por um painel e por relatórios em PDF e TXT.
 - [Requisitos](#requisitos)
 - [Instalação no Windows](#instalação-no-windows)
 - [Como usar](#como-usar)
+  - [Exercícios sob medida](#4-montar-exercícios-sob-medida-opcional)
+  - [Laudos e documentos](#5-laudos-e-documentos)
+  - [Sessão pela internet](#sessão-pela-internet-paciente-em-casa)
+- [Aprendizado e pesquisa](#aprendizado-e-pesquisa)
 - [Capturas de tela](#capturas-de-tela)
 - [Métricas](#métricas)
 - [Dados, privacidade e LGPD](#dados-privacidade-e-lgpd)
 - [Pasta compartilhada](#pasta-compartilhada)
 - [Desenvolvimento](#desenvolvimento)
 - [Documentação](#documentação)
+- [Hospedagem gratuita](#hospedagem-gratuita)
 - [Licença](#licença)
 
 ---
@@ -44,8 +49,9 @@ Duas aplicações:
 
 | Aplicação | Para quem | Como abrir |
 |---|---|---|
-| **Aplicativo do paciente** | paciente, durante a sessão | `scripts\spectra.bat` |
-| **Painel do fisioterapeuta** | profissional | `scripts\painel.bat` |
+| **Painel do fisioterapeuta** | profissional: pacientes, TCLE, exercícios, laudos, salas e relatórios | `scripts\painel.bat` |
+| **Página do paciente** | paciente, no navegador, no mesmo computador ou em casa | link gerado pelo painel |
+| Aplicativo Windows (anterior) | paciente, com pintura e modos educativos | `scripts\spectra.bat` |
 
 ## Gestos
 
@@ -61,6 +67,18 @@ Perfil **padrão** (configurável por paciente no painel):
 
 Dentro do menu, a cor é escolhida **apontando e mantendo** (cerca de 1,2 s) sobre a amostra. Os
 botões da tela funcionam do mesmo jeito.
+
+Gestos adicionais, em todos os modos do aplicativo:
+
+| Gesto | Ação |
+|---|---|
+| **pinça** (encostar polegar e indicador) | **clique** imediato no botão sob o cursor |
+| polegar no **médio / anelar / mínimo** | escolhe **vermelho / verde / azul** no desenho (configurável) |
+| **aproximar / afastar** a mão da câmera | traço mais grosso / mais fino no desenho; zoom no modo ambiente estéril |
+
+O cursor é suavizado por um **Filtro de Kalman**. A profundidade vem da área do polígono da
+palma, corrigida pela razão de aspecto, para que **girar a mão não seja confundido com
+aproximar**. Detalhes e resultados em [docs/learning.md](docs/learning.md).
 
 Existe também o perfil **simplificado**, para pouca destreza: pintar é fazer uma **pinça**
 (polegar encostando no indicador), o que dispensa controle independente dos dedos. Perfis
@@ -127,63 +145,105 @@ Em **Consentimento (TCLE)**, leia o termo com o participante e registre o aceite
 > **Nenhuma sessão pode ser iniciada sem consentimento registrado.** Isso é uma regra do banco
 > de dados, não apenas da interface.
 
-### 4. Configurar e iniciar a sessão
+### 4. Montar exercícios sob medida (opcional)
+
+Em **Exercícios do paciente**, o fisioterapeuta cria exercícios a partir de **movimentos que o
+SPECTRA já reconhece de forma validada** e ajusta os parâmetros dentro de limites seguros:
+
+| Movimento base | Parâmetros ajustáveis |
+|---|---|
+| Abrir e fechar a mão | repetições, tempo segurando o punho fechado |
+| Pinça (polegar com um dedo) | dedo, distância do toque (ampla/padrão/precisa), tempo segurando |
+| Onda de dedos | ordem (indicador → mínimo ou o inverso) |
+| Levantar um dedo | dedo, exigir os outros dobrados (isolado), tempo segurando |
+| Oposição do polegar | tocar indicador, médio, anelar e mínimo em sequência; distância do toque |
+
+Nome e instruções são livres; se as instruções ficarem vazias, o SPECTRA as gera a partir do
+movimento. Valores fora dos limites (por exemplo, 0 ou 31 repetições, mais de 5 s segurando)
+são recusados. Use **Testar um exercício com a câmera** para fazer o movimento e conferir a
+contagem antes de prescrever. Arquivar um exercício o retira de novas sessões sem alterar o
+histórico das anteriores.
+
+### 5. Laudos e documentos
+
+Em **Laudos e documentos**, cada paciente tem seu prontuário de documentos:
+
+- **Escrever laudo:** laudo fisioterapêutico, evolução ou encaminhamento em texto, que pode
+  ser baixado em PDF para impressão;
+- **Anexar arquivo:** laudo médico, exame ou encaminhamento em **PDF, PNG ou JPG** (até 10 MB).
+  O tipo é conferido pelo conteúdo do arquivo, não pela extensão.
+
+Tudo é **criptografado** neste computador, entra no backup criptografado, aparece na
+exportação LGPD e é apagado na exclusão ou anonimização do paciente. Abrir, baixar ou excluir
+um documento fica registrado na auditoria.
+
+### 6. Configurar e iniciar a sessão
 
 Em **Nova sessão**, escolha a mão tratada, o perfil de gestos, a dificuldade, a duração e os
-exercícios. A opção padrão é **No navegador (local, sem comandos)**.
+exercícios (básicos e personalizados do paciente). Clique em **Iniciar sessão** para gerar o
+código da sala, válido por 1 hora e protegido pelo PIN do paciente.
 
-### 5. Sessão do paciente no navegador
+- **Paciente neste computador:** clique em **Abrir sessão do paciente**.
+- **Paciente em casa:** veja [Sessão pela internet](#sessão-pela-internet-paciente-em-casa).
 
-1. Clique em **Iniciar sessão** no painel para gerar o código da sala.
-2. Clique em **Abrir sessão do paciente**: uma nova aba recebe o código automaticamente.
-3. **Entrar:** o paciente confirma o PIN e clica em **Entrar na sessão**.
-4. **Preparar:** o paciente informa a dor atual (escala 0–10), confirma a lista de preparo
-   (mão visível, boa iluminação, espaço livre, sem dor forte) e vê a prévia dos exercícios.
+### 7. Sessão do paciente no navegador
+
+1. **Entrar:** o paciente abre o link (ou digita o código), confirma o PIN e clica em
+   **Entrar na sessão**.
+2. **Preparar:** informa a dor atual (escala 0–10), confirma a lista de preparo (mão visível,
+   boa iluminação, distância, parar se doer) e vê os exercícios do dia com a meta de cada um.
    Com dor **8 ou mais**, o exercício é bloqueado e o paciente é orientado a falar com o
    fisioterapeuta.
-5. **Exercitar:** clique em **Iniciar câmera** e autorize a webcam no Chrome ou Edge.
-   A prévia da câmera é exibida diretamente no navegador, sem esperar a análise do Python.
-   Não há menus, textos ou pontos desenhados sobre o vídeo.
-   Ao lado ficam exercício, repetições, tempo restante e as dicas do Spectro.
-   Consulte **Como fazer este exercício** para as instruções e use **Próximo exercício**
-   para avançar, sem precisar apontar para botões dentro da câmera.
-   Para reduzir a latência, o navegador solicita até 960 × 540 a 30 FPS, e o detector
-   rastreia uma mão entre os frames. Mostre somente a mão configurada para a sessão.
-   Os 30 FPS são uma solicitação, não uma garantia: câmera e computador limitam a taxa real.
-   A prévia é espelhada apenas na tela; o detector recebe a imagem original para identificar
-   a mão anatômica correta. **Esquerda/direita se referem à sua mão, não ao lado da tela.**
-   A contagem depende da velocidade da análise, mesmo quando a prévia está fluida.
-   Os lembretes de descanso aparecem ao lado do vídeo.
-6. Clique em **Finalizar e salvar sessão**, ou pare a câmera, para salvar as métricas.
-7. **Concluir:** o paciente vê o resumo e informa a dor após a sessão. Dor 8 ou mais, ou
+3. **Exercitar:** clique em **Iniciar câmera** e autorize a webcam (Chrome, Edge ou Firefox).
+   Na primeira vez o navegador carrega o modelo de reconhecimento da mão (cerca de 20 MB).
+   Ao lado do vídeo ficam exercício, repetições, tempo restante, a barra de "segure a posição"
+   e as dicas do Spectro, que dizem o próximo passo ("Toque o polegar no anelar", "Agora
+   solte"). Use **Próximo exercício** para avançar.
+   **Esquerda/direita se referem à sua mão, não ao lado da tela.** Lembretes de descanso
+   aparecem ao lado do vídeo.
+4. Clique em **Finalizar e salvar sessão**, ou pare a câmera, para salvar as métricas.
+5. **Concluir:** o paciente vê o resumo e informa a dor após a sessão. Dor 8 ou mais, ou
    aumento de 3 pontos ou mais, exibe um aviso para conversar com o fisioterapeuta.
 
 Enquanto isso, a tela **Início** do painel mostra as salas ao vivo (aguardando, em andamento,
-concluída, interrompida), com exercício atual, repetições, mão visível e progresso. Apenas
-contadores são compartilhados entre as abas; nenhuma imagem é guardada ou transmitida.
+concluída, interrompida), com exercício atual, repetições, mão visível e progresso.
 
-O paciente não precisa executar comandos nem instalar outro aplicativo. Para iniciar o painel,
-o profissional pode dar dois cliques em `scripts\painel.bat`. O atalho procura primeiro o
-ambiente `.venv-py312`, depois `.venv` e `.venv312`; as dependências devem estar instaladas nele.
-Após atualizar o código, reinicie o painel para carregar a nova dependência `streamlit-webrtc`.
+**Como o vídeo é tratado:** o reconhecimento da mão (MediaPipe) roda **no navegador do
+paciente**, com arquivos servidos pelo próprio SPECTRA, sem CDN. Apenas 21 pontos da mão por
+quadro são enviados ao painel; **nenhuma imagem ou vídeo sai do computador do paciente** e
+nada é gravado. Isso também dispensa servidores de vídeo (STUN/TURN) e funciona em conexões
+domésticas comuns.
 
-**Esta é a primeira etapa, local:** painel e navegador do paciente devem estar no **mesmo
-computador**, acessando `http://localhost:8501`. A sala não é acessível da casa do paciente.
-Não há videochamada nem áudio nesta etapa. Não publique este painel na internet.
-O vídeo vai do navegador ao processo local do SPECTRA, é processado em memória e não é gravado;
-o reconhecimento ainda não roda no navegador. Não há servidores STUN/TURN externos configurados.
+Uma sala admite um navegador por vez. Uma conexão interrompida pode ser retomada após
+90 segundos sem atividade; uma sala concluída não pode ser reutilizada. Fechar a aba encerra
+e salva, mas uma queda do painel pode perder métricas ainda em memória: prefira finalizar
+pelo botão e conferir o histórico.
 
-O código de 12 caracteres expira em uma hora para entrada e exige o PIN cadastrado.
-Uma sala admite um navegador por vez. Uma conexão interrompida pode ser substituída após
-90 segundos sem atividade; uma sala concluída não pode ser reutilizada. Fechar a aba
-normalmente encerra o vídeo e salva, mas uma queda do processo pode perder as métricas ainda
-em memória: prefira sempre finalizar pelo botão e conferir o histórico.
-Nesta etapa estão disponíveis abrir/fechar a mão, pinça e onda de dedos, respeitando a seleção
-e a duração configuradas no painel. O início da sessão ocorre com a primeira imagem recebida.
+### Sessão pela internet (paciente em casa)
 
-**Próxima etapa, ainda não implementada:** hospedagem HTTPS, processamento de gestos no
-navegador, acesso remoto por link/código, acompanhamento e chamada de vídeo com sinalização
-e TURN, além da revisão de autenticação, consentimento e infraestrutura para uso pela internet.
+O SPECTRA gera um **endereço https gratuito** com o
+[Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/do-more-with-tunnels/trycloudflare/)
+(modo *quick tunnel*: sem conta, sem cartão, sem configurar roteador):
+
+1. Em **Nova sessão**, no quadro **Acesso pela internet**, clique em **Baixar cloudflared**
+   na primeira vez (o programa oficial vem do GitHub da Cloudflare; também pode ser instalado
+   com `winget install Cloudflare.cloudflared`).
+2. Clique em **Ativar link pela internet**. Em alguns segundos aparece um endereço como
+   `https://palavras-aleatorias.trycloudflare.com`.
+3. Inicie a sessão: o painel mostra o **link do paciente**, que já abre na sala certa. Envie
+   o link por um canal privado; o paciente ainda precisa do **PIN**.
+4. Ao terminar, clique em **Desativar link**.
+
+Segurança do acesso remoto:
+
+- Pelo endereço público **só abre a página do paciente** (código da sala + PIN, com bloqueio
+  após 5 tentativas erradas). O painel do fisioterapeuta, os prontuários e os laudos
+  respondem **apenas** a quem está neste computador; o SPECTRA reconhece o acesso externo pelo
+  endereço e pela origem da página, e nega o painel mesmo com uma sessão de login copiada.
+- O painel continua escutando só em `localhost`; quem se conecta à internet é o cloudflared.
+- O link vale enquanto o painel e este computador estiverem ligados e muda a cada ativação.
+- O *quick tunnel* da Cloudflare é gratuito e destinado a testes e demonstrações, sem garantia
+  de disponibilidade. Para uso clínico contínuo, avalie um túnel com conta e domínio próprios.
 
 #### Aplicativo Windows anterior (opcional)
 
@@ -202,9 +262,49 @@ Para uso livre, sem gravar nada:
 scripts\spectra.bat
 ```
 
-Opções: `--hand Left|Right`, `--camera N`, `--data-dir CAMINHO`, `--no-sound`, `--verbose`.
+Opções: `--hand Left|Right`, `--camera N`, `--data-dir CAMINHO`, `--filter kalman|exponential|raw`,
+`--usability CÓDIGO`, `--no-sound`, `--verbose`.
 
-### 6. Relatórios e evolução
+O menu do aplicativo inclui o modo **Ambiente estéril**: um visualizador de imagens operado sem
+toque, pensado para centros cirúrgicos. Dois dedos avançam, três voltam, aproximar a mão amplia,
+afastar reduz, mão aberta restaura o zoom e **punho fechado trava/destrava** todos os comandos.
+As imagens são sintéticas; nenhum exame real é usado.
+
+## Aprendizado e pesquisa
+
+Seção **Aprendizado e pesquisa** do painel, com cinco abas:
+
+| Aba | O que faz |
+|---|---|
+| 🎓 **Trilha de gestos** | 8 lições curtas, conferidas pela câmera, ensinam a interface (mostrar a mão, abrir, fechar, apontar, clique por pinça, cores nos dedos, aproximar, girar sem aproximar). Mede o tempo de aprendizagem e dá estrelas. O paciente também pode fazê-la antes dos exercícios. |
+| 🧠 **Gestos personalizados (IA)** | O fisioterapeuta grava alguns segundos de cada gesto do paciente, treina um classificador k-NN (sem GPU), vê a acurácia por validação cruzada e a matriz de confusão, testa ao vivo e associa cada gesto a um comando. O modelo vai para o prontuário e para o aplicativo. |
+| 🤏 **Calibrar clique** | Aprende os limites de pinça da mão do paciente, para quem tem pouca oposição do polegar. |
+| 🧪 **Testes com usuários** | Participantes anônimos (P01…), comandos da tarefa de apontar (ISO 9241-9) com filtros em ordem contrabalanceada, questionário **SUS**, comparação estatística (teste t pareado) e exportação em **CSV**. |
+| 📊 **Avaliação dos algoritmos** | Compara Kalman × média exponencial × sem filtro e os três estimadores de profundidade em dados sintéticos de verdade conhecida. |
+
+As mesmas tabelas saem no terminal, para o capítulo de resultados:
+
+```powershell
+.venv-py312\Scripts\python.exe -m spectra.evaluation
+```
+
+Resultados atuais (detalhes e método em [docs/learning.md](docs/learning.md)):
+
+- **Kalman:** reduz o tremor do cursor em cerca de 73% e tem o menor erro em traços em
+  movimento (4,0 px, contra 5,9 px sem filtro e 14,7 px da média exponencial, que atrasa).
+- **Profundidade:** só a área erra até 52% quando a mão gira. A razão de aspecto mantém o
+  erro médio em cerca de 2% em todos os cenários. A distância pulso–dedo médio corrige a
+  pronação, mas não a flexão do punho.
+
+Protocolo de teste por participante (cerca de 20 minutos): TCLE → trilha de gestos → tarefa de
+apontar com os dois filtros → SUS. Os comandos aparecem prontos no painel, por exemplo:
+
+```powershell
+scripts\spectra.bat --usability P01 --filter kalman
+scripts\spectra.bat --usability P01 --filter exponential
+```
+
+### 8. Relatórios e evolução
 
 Em **Histórico e evolução**: gráficos por métrica ao longo das sessões, dor antes e depois de
 cada sessão, geração e download do PDF e do TXT, e exportação para a pasta compartilhada.
@@ -219,23 +319,15 @@ e pacientes sem TCLE ativo, com dicas do Spectro sobre o próximo passo.
   do paciente. As animações respeitam a preferência de movimento reduzido do sistema.
 - Tudo funciona offline: sem fontes, scripts ou imagens externas.
 
-### 7. Modo demonstração
+### 9. Modo demonstração
 
 O interruptor **Modo demonstração** na barra lateral substitui o nome do paciente pelas
 iniciais na tela e nos relatórios. Use-o ao projetar a apresentação do TCC.
 
 ## Capturas de tela
 
-<!-- TODO: substituir pelos prints reais antes da entrega -->
-
-| Tela | Imagem |
-|---|---|
-| Menu principal | `docs/images/menu.png` *(a incluir)* |
-| Pintura livre | `docs/images/pintura.png` *(a incluir)* |
-| Desenho guiado | `docs/images/desenho-guiado.png` *(a incluir)* |
-| Fisioterapia | `docs/images/fisioterapia.png` *(a incluir)* |
-| Painel — histórico | `docs/images/painel-historico.png` *(a incluir)* |
-| Relatório em PDF | `docs/images/relatorio.png` *(a incluir)* |
+As capturas reais devem ser adicionadas antes da entrega final. Use dados fictícios e não inclua
+rosto, nome, CPF, diagnóstico, relatórios ou qualquer dado de participante.
 
 ## Métricas
 
@@ -255,16 +347,18 @@ interpretar qualquer número.
 
 ## Dados, privacidade e LGPD
 
-- **Nenhum vídeo ou imagem do paciente é armazenado.** Os quadros são processados na memória e
-  descartados; só os números derivados são gravados.
+- **Nenhum vídeo ou imagem do paciente é armazenado.** Na sessão pelo navegador, o
+  reconhecimento roda no computador do paciente e só os 21 pontos da mão chegam ao painel; só
+  os números derivados são gravados.
 - Nada de paciente é versionado neste repositório. Tudo fica em um diretório de dados
   configurável, fora do repositório (padrão `~/Documents/Spectra/`, ou `%USERPROFILE%\Documents\Spectra`).
-- CPF, telefone, endereço, contraindicações e anotações clínicas são **criptografados** em
-  repouso; a chave fica no cofre de credenciais do sistema operacional.
+- CPF, telefone, endereço, contraindicações, anotações clínicas, **laudos e anexos** são
+  **criptografados** em repouso; a chave fica no cofre de credenciais do sistema operacional.
 - O CPF nunca aparece em nome de arquivo, log ou mensagem de erro, e é mascarado nos relatórios.
 - PIN e senha usam **scrypt**, com bloqueio após 5 tentativas erradas.
 - Todo acesso, exportação e exclusão fica registrado em log de auditoria.
 - Exportação, anonimização e exclusão dos dados de um paciente estão no painel.
+- Pela internet, apenas a página do paciente fica acessível; o painel responde só localmente.
 
 Leia [docs/lgpd.md](docs/lgpd.md) antes de coletar dados de participantes reais. Ele também
 registra a pendência de verificar com o(a) orientador(a) a necessidade de aprovação por comitê
@@ -279,21 +373,28 @@ Relatórios e backups criptografados são exportados para uma pasta compartilhad
 > **A pasta compartilhada deve ter acesso restrito** a pessoas nomeadas — nunca "qualquer pessoa
 > com o link".
 
-Link da pasta: `<<DEFINIR: URL da pasta compartilhada com acesso restrito>>`
+Não há link de compartilhamento definido no repositório. Configure `share_dir` no arquivo local
+`config.json` e não publique links, relatórios, backups ou dados de participantes no GitHub Pages.
 
 ## Desenvolvimento
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
-pip install -r requirements-dev.txt
+python -m pip install -r requirements-dev.txt
+python -m pip install -r requirements-docs.txt
 
-black . && isort . && ruff check . && pytest
-pytest --cov --cov-report=term-missing   # cobertura
+python -m black --check .
+python -X utf8 -m isort --check-only spectra tests
+python -m ruff check .
+python -m pytest
+python -m pytest --cov --cov-report=term-missing   # cobertura
 ```
 
 A suíte roda **headless**: sem câmera, sem janela e sem `winsound`. As mãos usadas nos testes
 são sintéticas (`tests/conftest.py`).
+
+O build de documentação executado pelo CI usa `python -m mkdocs build --strict`.
 
 Estrutura:
 
@@ -304,13 +405,20 @@ spectra/
   locales/         pt_BR.json, tcle_pt_BR.md
   detection/       câmera, MediaPipe, constantes de landmarks
   gestures/        ângulos, calibração, perfis, máquina de estados
-  core/            canvas, rastro, suavização, limites de sessão
+  core/            canvas, rastro, Filtro de Kalman, limites de sessão
   ui/              botões, widgets, teclado por gestos, som
-  modes/           menu, pintura, desenho guiado, educativos, fisioterapia
+  modes/           menu, pintura, desenho guiado, educativos, fisioterapia, ambiente estéril, teste
+  exercises/       exercícios sob medida: movimentos validados, detectores, executor
+  learning/        classificador de gestos (k-NN) e trilha de gestos
+  evaluation/      mão 3D sintética e avaliação reprodutível dos algoritmos
+  domains.py       gestos → comandos por domínio (reabilitação, estéril, desenho)
+  usability.py     SUS, tarefa de apontar (Fitts/ISO 9241-9), estatística
   guided/          figuras-alvo e pontuação
   metrics/         ADM, tremor, fadiga, precisão, qualidade, gravador
-  storage/         SQLite, criptografia, auditoria, backup
-  reports/         objeto de relatório, PDF, TXT, gráficos
+  storage/         SQLite, criptografia, auditoria, backup, laudos
+  reports/         objeto de relatório, PDF, TXT, gráficos, laudo em PDF
+  browser/         página do paciente, salas, câmera com MediaPipe no navegador
+  remote.py        link gratuito pela internet (Cloudflare Tunnel) e controle de acesso
   therapist_panel/ painel Streamlit
 tests/unit/        testes de lógica pura
 docs/              decisões, arquitetura, gestos, métricas, LGPD
@@ -324,9 +432,38 @@ scripts/           atalhos .bat para Windows
 | [docs/architecture.md](docs/architecture.md) | camadas, fluxo de dados e por que o código é separado assim |
 | [docs/gestures.md](docs/gestures.md) | motor de gestos, calibração, perfis e validação |
 | [docs/metrics.md](docs/metrics.md) | definição, interpretação e **limites** de cada métrica |
+| [docs/learning.md](docs/learning.md) | Kalman, profundidade Z, clique, IA de gestos, trilha, testes com usuários e resultados |
 | [docs/lgpd.md](docs/lgpd.md) | proteção de dados, direitos do titular e ética em pesquisa |
 | [docs/decisions.md](docs/decisions.md) | registro de todas as decisões técnicas e seus motivos |
 
+## Hospedagem gratuita
+
+Tudo no SPECTRA funciona sem custo:
+
+| O quê | Onde | Custo |
+|---|---|---|
+| Painel, banco de dados, laudos | computador do fisioterapeuta (`localhost`) | grátis |
+| Acesso do paciente em casa | [Cloudflare quick tunnel](#sessão-pela-internet-paciente-em-casa) (`*.trycloudflare.com`) | grátis, sem conta |
+| Reconhecimento da mão | navegador do paciente (MediaPipe, arquivos servidos pelo painel) | grátis |
+| Documentação do TCC | GitHub Pages | grátis em repositório público |
+| Testes automáticos (Windows e Linux, Python 3.10–3.12) | GitHub Actions | grátis em repositório público |
+
+O banco **não** vai para a nuvem: dados de saúde ficam criptografados no computador do
+fisioterapeuta, e a internet só alcança a página do paciente.
+
+**Documentação no GitHub Pages.** O workflow constrói o site com MkDocs, trata avisos como
+erros e publica as alterações feitas na branch `main`. Para ativar:
+
+1. No GitHub, abra **Settings → Pages** e selecione **GitHub Actions** em *Build and deployment*.
+2. Faça merge das alterações na branch `main`; acompanhe o workflow **Publish documentation**
+   em **Actions**.
+3. O site ficará disponível em `https://giovandreoli.github.io/tcc/` após a primeira publicação.
+
+Esse site contém **somente documentação pública**. Não publique dados de pacientes,
+relatórios, backups, chaves ou arquivos de configuração, e não torne o repositório público se
+houver qualquer dado restrito nele.
+
 ## Licença
 
-MIT. Veja `pyproject.toml`.
+MIT, veja [LICENSE](LICENSE). O MediaPipe Tasks Vision distribuído em
+`spectra/browser/camera/vendor/` é Apache-2.0 (licença na mesma pasta).

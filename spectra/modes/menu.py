@@ -19,6 +19,7 @@ MENU_ENTRIES: tuple[tuple[AppMode | str, tuple[int, int, int]], ...] = (
     (AppMode.EDU_COLORS, (20, 20, 120)),
     (AppMode.EDU_COUNT, (80, 20, 120)),
     (AppMode.PHYSIO, (120, 55, 15)),
+    (AppMode.STERILE, (90, 90, 30)),
     (ACTION_QUIT, (120, 15, 15)),
 )
 
@@ -26,10 +27,11 @@ MENU_ENTRIES: tuple[tuple[AppMode | str, tuple[int, int, int]], ...] = (
 class MenuMode(BaseMode):
     def __init__(self, context: ModeContext) -> None:
         super().__init__(context)
-        width, height, gap = 320, 64, 18
-        x = (self.width - width) // 2
+        width, gap = 320, 14
         count = len(MENU_ENTRIES)
-        top = (self.height - (count * height + (count - 1) * gap)) // 2
+        height = max(36, min(64, (self.height - 150 - (count - 1) * gap) // count))
+        x = (self.width - width) // 2
+        top = max(110, (self.height - (count * height + (count - 1) * gap)) // 2)
         self.buttons = [
             self.make_button(
                 x,

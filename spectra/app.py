@@ -33,6 +33,8 @@ from spectra.modes.guided_draw import GuidedDrawMode
 from spectra.modes.menu import MenuMode
 from spectra.modes.physio import PhysioMode
 from spectra.modes.pin_entry import ACTION_AUTHENTICATED, PinEntryMode
+from spectra.modes.sterile import SterileViewerMode
+from spectra.modes.usability import UsabilityMode
 from spectra.ui.sound import SoundPlayer
 from spectra.ui.text import draw_text, draw_text_centered
 from spectra.ui.widgets import dim_frame, draw_hand_landmarks, draw_status_bar
@@ -50,7 +52,25 @@ MODE_FACTORIES: dict[AppMode, type[BaseMode]] = {
     AppMode.EDU_COLORS: EduColorsMode,
     AppMode.EDU_COUNT: EduCountMode,
     AppMode.PHYSIO: PhysioMode,
+    AppMode.STERILE: SterileViewerMode,
+    AppMode.USABILITY: UsabilityMode,
 }
+
+
+def load_learned_gestures(path) -> tuple[Any, dict[str, str]]:
+    """Load the classifier exported by the panel; ``(None, {})`` if absent or unreadable."""
+    import json
+
+    from spectra.learning.classifier import GestureClassifier, TrainingError
+
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return GestureClassifier.from_dict(data["model"]), dict(data.get("bindings", {}))
+    except FileNotFoundError:
+        return None, {}
+    except (OSError, ValueError, KeyError, TypeError, TrainingError):
+        logger.warning("learned gestures file is unreadable; ignoring it")
+        return None, {}
 
 
 class SpectraApp:
@@ -61,13 +81,15 @@ class SpectraApp:
         config: AppConfig | None = None,
         hand_label: str | None = None,
         session_id: str | None = None,
+        usability_code: str | None = None,
     ) -> None:
         self.config = config or load_config()
         self.config.ensure_directories()
         set_locale(self.config.locale)
         self.hand_label = hand_label
         self.session_id = session_id
-        self.mode = AppMode.MENU
+        self.usability_code = usability_code
+        self.mode = AppMode.USABILITY if usability_code else AppMode.MENU
         self.modes: dict[AppMode, BaseMode] = {}
         self.fps = FpsCounter()
         self.sound = SoundPlayer(self.config.sound_enabled)
@@ -159,6 +181,21 @@ class SpectraApp:
             self._service.close()
             self._service = None
 
+    def finish_usability(self) -> dict | None:
+        """Store the pointing-task results of a user test, keyed by the participant code."""
+        mode = self.modes.get(AppMode.USABILITY)
+        if not self.usability_code or not isinstance(mode, UsabilityMode):
+            return None
+        summary = {**mode.task.summary(), "completed": mode.task.finished}
+        from spectra.service import SpectraService
+
+        with SpectraService.open(self.config) as service:
+            service.db.add_usability_result(
+                self.usability_code, "pointing", self.config.pointer_filter, summary
+            )
+        logger.info("%s", t("usability.saved", code=self.usability_code))
+        return summary
+
     # ------------------------------------------------------------------ setup
     def build_modes(
         self, width: int, height: int, *, require_pin: bool = True, camera_overlay: bool = True
@@ -169,6 +206,7 @@ class SpectraApp:
             if self._service and self._session
             else None
         )
+        model, bindings = load_learned_gestures(self.config.gesture_model_path)
         context = ModeContext(
             config=self.config,
             width=width,
@@ -179,6 +217,8 @@ class SpectraApp:
             recorder=self.recorder,
             guard=self.guard,
             camera_overlay=camera_overlay,
+            gesture_model=model,
+            learned_bindings=bindings,
             **({"calibration": calibration} if calibration else {}),
         )
         self.modes = {mode: factory(context) for mode, factory in MODE_FACTORIES.items()}
@@ -245,6 +285,8 @@ class SpectraApp:
         if action == ACTION_QUIT:
             return False
         if action == ACTION_MENU:
+            if self.usability_code:
+                return False  # a user test has no menu: leaving ends the test
             self.reset_mode(AppMode.MENU)
             self.switch_to(AppMode.MENU)
         elif isinstance(action, AppMode):
@@ -270,6 +312,8 @@ class SpectraApp:
             self.attach_session()
             height, width = first.shape[:2]
             self.build_modes(width, height)
+            if self.usability_code:
+                self.switch_to(AppMode.USABILITY)
             if not self.attached:
                 self.guard.start()
 
@@ -300,4 +344,5 @@ class SpectraApp:
                 detector.close()
                 cv2.destroyAllWindows()
                 self.finish_session()
+                self.finish_usability()
                 logger.info("%s", t("app.stopped"))

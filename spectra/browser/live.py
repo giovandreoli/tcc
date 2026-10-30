@@ -1,7 +1,8 @@
 """In-process registry of running browser sessions, for the therapist's live monitor.
 
-The panel and the patient page run in the same local Streamlit process, so the therapist
-can follow progress without any network relay. Only counters are exposed: no frames.
+The patient's browser sends landmarks to the panel's Streamlit process, wherever the
+patient is, so the therapist can follow progress without any extra relay. Only counters
+are exposed: no landmarks and no frames.
 """
 
 from __future__ import annotations
@@ -28,6 +29,10 @@ class LiveStatus:
     exercise_index: int
     exercise_total: int
     safety_key: str | None = None
+    exercise_title: str = ""
+    cue: str = ""
+    hold_fraction: float = 0.0
+    instructions: tuple[str, ...] = ()
 
     @property
     def time_fraction(self) -> float:

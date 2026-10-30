@@ -12,7 +12,7 @@ import streamlit as st
 from spectra.browser.live import LiveStatus
 from spectra.browser.rooms import RoomError, Rooms
 from spectra.browser.session import BrowserSession
-from spectra.browser.video import camera_streamer, stop_camera
+from spectra.browser.video import camera_streamer, reset_camera
 from spectra.i18n import t
 from spectra.service import SpectraService
 from spectra.webui import art
@@ -21,6 +21,9 @@ from spectra.webui import components as ui
 SESSION_KEY = "browser_session"
 STAGE_KEY = "browser_stage"
 PAIN_AFTER_KEY = "browser_pain_after_saved"
+CAMERA_KEY = "patient_camera"
+LEARN_KEY = "patient_learning_path"
+LEARN_CAMERA_KEY = "patient_learning_camera"
 CHECKLIST = ("light", "framing", "distance", "comfort")
 STEPS = ("enter", "prepare", "exercise", "finish")
 
@@ -39,10 +42,9 @@ def _stepper(stage: str) -> None:
 
 
 def _reset() -> None:
-    session = st.session_state.get(SESSION_KEY)
-    if session is not None:
-        stop_camera(session)
-    for key in (SESSION_KEY, STAGE_KEY, PAIN_AFTER_KEY):
+    reset_camera(CAMERA_KEY)
+    reset_camera(LEARN_CAMERA_KEY)
+    for key in (SESSION_KEY, STAGE_KEY, PAIN_AFTER_KEY, LEARN_KEY):
         st.session_state.pop(key, None)
 
 
@@ -63,6 +65,10 @@ def coach(status: LiveStatus, hand_label: str | None = None) -> tuple[str, str]:
         return "think", t(key)
     if status.target and status.reps >= status.target:
         return "cheer", t("ux.patient.coach.exercise_done")
+    if status.cue:
+        return (
+            "cheer" if status.target and status.reps >= status.target / 2 else "calm"
+        ), status.cue
     if status.target and status.reps >= status.target / 2:
         return "cheer", t("ux.patient.coach.halfway")
     return "calm", t("ux.patient.coach.keep_going")
@@ -89,12 +95,17 @@ def _render_enter(service: SpectraService) -> None:
         except RoomError as exc:
             st.error(t(str(exc)))
         else:
-            st.session_state[SESSION_KEY] = BrowserSession(service.config, admission)
+            st.session_state[SESSION_KEY] = BrowserSession(
+                service.config,
+                admission,
+                calibration=service.calibration_for(admission.session.patient_id),
+            )
             st.session_state[STAGE_KEY] = "prepare"
+            reset_camera(CAMERA_KEY)
             st.query_params.clear()
             st.query_params["paciente"] = "1"
             st.rerun()
-    st.caption(t("browser.local_only"))
+    st.caption(t("browser.access_note"))
 
 
 # ----------------------------------------------------------------- prepare
@@ -116,11 +127,12 @@ def _render_prepare(session: BrowserSession) -> None:
         checks = [st.checkbox(t(f"ux.checklist.{item}")) for item in CHECKLIST]
     with right:
         st.subheader(t("ux.patient.today"))
-        for index, name in enumerate(session.admission.exercises, start=1):
+        for index, spec in enumerate(session.admission.exercises, start=1):
             with st.container(border=True):
-                st.markdown(f"**{index}. {t(f'physio.exercise.{name}')}**")
-                for line in range(1, 4):
-                    st.caption(t(f"physio.instructions.{name}_{line}"))
+                st.markdown(f"**{index}\\. {ui.escape_markdown(spec.display_title())}**")
+                st.caption(t("ux.patient.reps_goal", reps=spec.target_reps))
+                for line in spec.display_instructions():
+                    st.caption(ui.escape_markdown(line))
         st.caption(t("ux.patient.duration", minutes=session.admission.duration_minutes))
 
     if pain >= art.SEVERE_PAIN:
@@ -138,6 +150,35 @@ def _render_prepare(session: BrowserSession) -> None:
         on_click=_start_exercise,
         args=(session,),
     )
+    st.button(
+        t("ux.patient.learn_first"),
+        use_container_width=True,
+        on_click=_set_stage,
+        args=("learn",),
+        help=t("ux.patient.learn_help"),
+    )
+
+
+def _set_stage(stage: str) -> None:
+    st.session_state[STAGE_KEY] = stage
+
+
+def _render_learn(service: SpectraService, session: BrowserSession) -> None:
+    from spectra.browser.learning_ui import render_tutorial
+    from spectra.browser.sinks import TutorialSink
+
+    _stepper("prepare")
+    ui.guide("hello", t("ux.patient.learn_intro"), t("ux.mascot.name"))
+    sink = st.session_state.get(LEARN_KEY)
+    if sink is None:
+        sink = TutorialSink(
+            hand_label=session.admission.session.hand.value,
+            calibration=session.calibration,
+            finger_colors=service.config.finger_colors,
+        )
+        st.session_state[LEARN_KEY] = sink
+    render_tutorial(sink, LEARN_CAMERA_KEY)
+    st.button(t("ux.patient.learn_back"), on_click=_set_stage, args=("prepare",), type="primary")
 
 
 def _leave(session: BrowserSession) -> None:
@@ -169,7 +210,7 @@ def _render_live(session: BrowserSession) -> None:
         "ux.live.exercise", current=status.exercise_index + 1, total=status.exercise_total
     )
     st.caption(exercise_label)
-    st.subheader(t(f"physio.exercise.{status.exercise}"))
+    st.subheader(ui.escape_markdown(status.exercise_title))
     st.html(
         art.stat_cards_html(
             [
@@ -185,9 +226,11 @@ def _render_live(session: BrowserSession) -> None:
     st.progress(min(1.0, status.reps / status.target) if status.target else 0.0)
     mood, message = coach(status, session.admission.session.hand.value)
     st.html(art.bubble_html(mood, message, size=44))
+    if status.hold_fraction > 0:
+        st.progress(status.hold_fraction, text=t("ux.live.hold"))
     with st.expander(t("ux.live.instructions")):
-        for line in range(1, 4):
-            st.caption(t(f"physio.instructions.{status.exercise}_{line}"))
+        for line in status.instructions:
+            st.caption(ui.escape_markdown(line))
     st.button(
         t("ux.live.next"),
         disabled=status.frames == 0,
@@ -196,12 +239,17 @@ def _render_live(session: BrowserSession) -> None:
     )
 
 
+@st.fragment
+def _render_camera(session: BrowserSession) -> None:
+    camera_streamer(session, CAMERA_KEY)
+
+
 def _render_exercise(session: BrowserSession) -> None:
     _stepper("exercise")
     camera, panel = st.columns([2, 1], gap="large")
     with camera:
         st.caption(t("ux.live.camera_hint"))
-        camera_streamer(session)
+        _render_camera(session)
         with st.expander(t("ux.live.camera_help")):
             st.caption(t("browser.camera_hint"))
             st.caption(t("browser.privacy"))
@@ -248,7 +296,6 @@ def _render_pain_after(service: SpectraService, session: BrowserSession) -> None
 
 
 def _render_finish(service: SpectraService, session: BrowserSession) -> None:
-    stop_camera(session)
     _stepper("finish")
     status = session.status()
     if status.error_key:
@@ -287,5 +334,7 @@ def render_patient(service: SpectraService) -> None:
     elif stage == "exercise":
         with st.container(key="exercise_workspace"):
             _render_exercise(session)
+    elif stage == "learn":
+        _render_learn(service, session)
     else:
         _render_prepare(session)

@@ -6,7 +6,7 @@ set "SPECTRA_PYTHON="
 
 for %%E in (.venv-py312 .venv .venv312) do (
     if not defined SPECTRA_PYTHON if exist "%%E\Scripts\python.exe" (
-        set "SPECTRA_PYTHON=%%E\Scripts\python.exe"
+        "%%E\Scripts\python.exe" -c "import streamlit, streamlit_webrtc" >nul 2>&1 && set "SPECTRA_PYTHON=%%E\Scripts\python.exe"
     )
 )
 

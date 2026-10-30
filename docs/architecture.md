@@ -4,35 +4,47 @@ Why SPECTRA is split the way it is, and what each boundary buys.
 
 ## 1. The constraint that shapes everything
 
-**Local browser extension:** the therapist panel now also serves a patient page selected by
-`?paciente=1` or a `?sala=<code>` link. `browser/rooms.py` admits an expiring code plus PIN,
-checks consent and enforces an exclusive renewable claim in SQLite. `browser/page.py` captures
-browser video through WebRTC with no external ICE servers and no audio. `browser/session.py`
-serializes frame processing and finalization, reusing `SpectraApp`, `HandDetector`, the selected
-physiotherapy exercises and the existing report metrics without opening an OpenCV window.
-The packaged `browser/camera` component attaches the camera track directly to a local video
-element and negotiates through `browser/video.py`. The adapter targets the pinned
-streamlit-webrtc 0.63.11 `WebRtcWorker` API; verify signaling and cleanup before upgrading it.
-The stock SENDONLY frontend has no preview, so it cannot provide this user interface.
-WebRTC uses SENDONLY: the visible preview is the browser's local camera track, while frames
-are analyzed asynchronously in Python. No processed video is encoded or sent back. The
-processor returns its input frame unchanged to the bounded receiver (size 1); the asynchronous
-processor consumes the newest queued input instead of accumulating inference work.
-Only the preview has a CSS mirror transform. Detection and recording use original,
-unmirrored camera pixels; hand labels refer to the patient's anatomical hand.
-Rest reminders are exposed in the live status and displayed beside the video.
-The duration and exercise selection are stored with the room.
+**Browser sessions, local or from the patient's home:** the therapist panel also serves a
+patient page selected by `?paciente=1` or a `?sala=<code>` link. `browser/rooms.py` admits an
+expiring code plus PIN, checks consent and enforces an exclusive renewable claim in SQLite;
+each room stores a snapshot of the exercise specs chosen for it.
+
+```
+patient's browser                                therapist's computer (Streamlit, localhost)
+───────────────────────────────────────────      ─────────────────────────────────────────────
+webcam ─► <video> preview (CSS mirror only)
+       └► MediaPipe Tasks Vision (WASM) ─► 21 points/frame ─► browser/frames.py (validate)
+          bundled in browser/camera/vendor   batches ~0.4 s      └► browser/session.py
+                                             acknowledged             └► exercises/runner.py
+                         ▲                                                 ├► detectors
+                         │ https://*.trycloudflare.com (optional)          ├► metrics recorder
+                         └──────────── cloudflared (remote.py) ◄──         └► service ► SQLite
+```
+
+`browser/camera/` is a dependency-free Streamlit component: it shows the local camera track,
+runs the hand landmarker in the browser (GPU delegate with CPU fallback) and sends only
+landmarks, with acknowledged delivery so nothing is lost or counted twice across reruns. No
+video ever leaves the patient's computer. `browser/session.py` turns batches into repetitions,
+safety prompts and the saved session; `LandmarkSession` (no persistence) also powers the
+therapist's "test this exercise" area.
+
+`exercises/` holds the patient-specific exercises: `catalog.py` defines the five validated
+movements and the bounded parameters of an `ExerciseSpec`; `detectors.py` holds one pure,
+timestamp-driven detector per movement (palm-normalised distances, hysteresis, nearest-
+fingertip rule, hold gates); `runner.py` sequences exercises and feeds the metric recorder.
+
+`remote.py` starts and stops the optional Cloudflare quick tunnel and decides whether a request
+is local. Requests coming through the tunnel only ever get the patient page; the panel,
+records and documents answer only to the therapist's own computer.
+
 `browser/live.py` keeps a weak-reference registry of running browser sessions so the panel's
 Home screen can show live counters (never frames); `Rooms.overview()` derives room statuses.
 `webui/` holds the presentation layer: the "Spectro" mascot (`art.py`, pure HTML builders),
 the design system (`theme.css`), Streamlit wrappers (`components.py`) and dashboard
-aggregations (`insights.py`).
+aggregations (`insights.py`). Clinical documents (written reports and encrypted attachments)
+live in `storage/db.py`, with the PDF rendering of written reports in `reports/document.py`.
 
-This extension is deliberately **same-computer only**, with a localhost-bound launcher.
-Frames leave the browser for the local Python process, never for a remote service, and are
-not persisted. This is not yet the target remote architecture: browser-side inference,
-HTTPS, remote access, therapist video, signaling and TURN are deferred.
-The existing desktop shell remains available.
+The existing desktop shell (OpenCV window, painting and educational modes) remains available.
 
 The application runs on **Windows with a webcam**, but it is developed and tested on
 **Linux/WSL with neither**. Every design decision below follows from that: the parts that
@@ -47,7 +59,7 @@ are pure.
 └───────────────────────────┬──────────────────────────────────────┘
                             │ plain data (landmarks, points, floats)
 ┌───────────────────────────▼──────────────────────────────────────┐
-│  Pure logic (538 unit tests, headless)                           │
+│  Pure logic (730+ unit tests, headless)                          │
 │  gestures/ · core/ · guided/ · metrics/ · reports/builder+txt    │
 │  storage/ · service.py                                           │
 └──────────────────────────────────────────────────────────────────┘
@@ -64,14 +76,21 @@ works without the vision stack installed.
 | Configuration | `config.py` | data directory, paths, tunables | — |
 | Localisation | `i18n/`, `locales/` | pt-BR catalog, dotted keys | — |
 | Detection | `detection/` | camera, MediaPipe, landmark constants | config |
-| Gestures | `gestures/` | angles, calibration, profiles, state machine | detection (types only) |
-| Core | `core/` | canvas, trail, smoothing, session guard | — |
+| Gestures | `gestures/` | angles, calibration, profiles, state machine, pinch click, depth, finger colours | detection (types only) |
+| Core | `core/` | canvas, trail, Kalman/exponential pointer filters, session guard | — |
 | Guided | `guided/` | target shapes, trace scoring | — |
 | Metrics | `metrics/` | recorder, ROM, tremor, fatigue, accuracy, quality | gestures, guided |
-| Storage | `storage/` | SQLite, encryption, audit, backup | — |
-| Reports | `reports/` | report object, TXT, PDF, charts | metrics, storage |
+| Exercises | `exercises/` | validated movements, bounded parameters, detectors, runner | gestures, metrics |
+| Learning | `learning/` | pose features, k-NN gesture classifier, gesture learning path | gestures |
+| Domains | `domains.py` | gesture tokens → commands per domain, lock | gestures |
+| Usability | `usability.py` | SUS, ISO 9241-9 pointing task, paired t-test | — |
+| Evaluation | `evaluation/` | synthetic 3-D hand, filter and depth benchmarks | core, gestures |
+| Storage | `storage/` | SQLite, encryption, audit, backup, clinical documents | — |
+| Reports | `reports/` | report object, TXT, PDF, charts, written-report PDF | metrics, storage |
 | Web UI | `webui/` | mascot, theme CSS, dashboard insights | storage (models) |
 | Service | `service.py` | use cases shared by both apps | all of the above |
+| Browser | `browser/` | rooms, landmark batches, patient page, camera component | service, exercises |
+| Remote | `remote.py` | Cloudflare quick tunnel, local-request check | — |
 | Modes | `modes/` | interactive screens | gestures, core, guided, ui |
 | Shells | `app.py`, `therapist_panel/` | camera loop; Streamlit UI | service, modes |
 
